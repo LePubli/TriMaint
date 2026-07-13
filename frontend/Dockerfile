@@ -31,7 +31,7 @@ ENV PATH="/app/node_modules/.bin:$PATH"
 RUN for i in 1 2 3; do \
       echo "npm ci attempt $i/3..."; \
       rm -rf node_modules; \
-      npm ci --include=dev --no-audit --no-fund; \
+      npm install --include=dev --no-audit --no-fund; \
       if [ -x node_modules/.bin/tsc ] && [ -x node_modules/.bin/vite ]; then \
         echo "npm ci attempt $i produced a working install."; \
         exit 0; \

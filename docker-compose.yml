@@ -27,6 +27,8 @@ services:
     build: ./backend
     container_name: trimaint_backend
     restart: unless-stopped
+    expose:
+      - "8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY requis (64+ caracteres aleatoires)}
@@ -62,6 +64,8 @@ services:
     build: ./frontend
     container_name: trimaint_frontend
     restart: unless-stopped
+    expose:
+      - "80"
     depends_on:
       backend:
         condition: service_healthy

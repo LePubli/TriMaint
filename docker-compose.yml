@@ -64,9 +64,6 @@ services:
     build: ./frontend
     container_name: trimaint_frontend
     restart: unless-stopped
-    # Port 80 exposé en interne uniquement - Coolify gère le routage via Traefik
-    expose:
-      - "80"
     depends_on:
       backend:
         condition: service_healthy

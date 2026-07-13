@@ -1,0 +1,24 @@
+from sqlalchemy.orm import Session
+from app.models.notification import Notification
+
+
+def create_notification(
+    db: Session,
+    title: str,
+    message: str,
+    notif_type: str = "info",
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+):
+    try:
+        notif = Notification(
+            title=title,
+            message=message,
+            type=notif_type,
+            entity_type=entity_type,
+            entity_id=entity_id,
+        )
+        db.add(notif)
+        db.commit()
+    except Exception:
+        db.rollback()

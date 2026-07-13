@@ -57,9 +57,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-  expose:
-      - "8000"
-      
+
   frontend:
     build: ./frontend
     container_name: trimaint_frontend

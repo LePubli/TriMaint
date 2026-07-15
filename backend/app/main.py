@@ -9,6 +9,7 @@ from slowapi.util import get_remote_address
 from app.api import (
     auth, machines, pannes, interventions, pieces,
     search, stats, uploads, admin, notifications, maintenance_preventive,
+    convoyeurs, base_connaissances, kpi, checklists,
 )
 from app.core.config import ALLOWED_ORIGINS, BOOTSTRAP_ADMIN, BOOTSTRAP_ADMIN_PASSWORD
 
@@ -42,7 +43,7 @@ async def lifespan(app: FastAPI):
                 else:
                     admin_user = User(
                         username="admin",
-                        email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", "admin@trimaint.local"),
+                        email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com"),
                         hashed_password=get_password_hash(BOOTSTRAP_ADMIN_PASSWORD),
                         role="admin",
                         is_active=True,
@@ -62,7 +63,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TriMaint API",
     description="GMAO pour Triselec",
-    version="1.1.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
 
@@ -92,9 +93,13 @@ app.include_router(uploads.router)
 app.include_router(admin.router)
 app.include_router(notifications.router)
 app.include_router(maintenance_preventive.router)
+app.include_router(convoyeurs.router)
+app.include_router(base_connaissances.router)
+app.include_router(kpi.router)
+app.include_router(checklists.router)
 
 
 @app.get("/api/health", tags=["health"])
 def health():
     """Endpoint de santé pour les healthchecks Docker."""
-    return {"status": "ok", "service": "TriMaint API", "version": "1.1.0"}
+    return {"status": "ok", "service": "TriMaint API", "version": "1.3.0"}

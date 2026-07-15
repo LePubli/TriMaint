@@ -12,14 +12,20 @@ const MachineDetail = lazy(() => import('./pages/MachineDetail'))
 const Lignes = lazy(() => import('./pages/Lignes'))
 const LigneDetail = lazy(() => import('./pages/LigneDetail'))
 const Pannes = lazy(() => import('./pages/Pannes'))
+const PanneDetail = lazy(() => import('./pages/PanneDetail'))
+const RapportPanne = lazy(() => import('./pages/RapportPanne'))
 const Interventions = lazy(() => import('./pages/Interventions'))
 const Pieces = lazy(() => import('./pages/Pieces'))
 const Recherche = lazy(() => import('./pages/Recherche'))
 const Utilisateurs = lazy(() => import('./pages/Utilisateurs'))
 const Activite = lazy(() => import('./pages/Activite'))
-const PanneDetail = lazy(() => import('./pages/PanneDetail'))
-const RapportPanne = lazy(() => import('./pages/RapportPanne'))
 const MaintenancePreventive = lazy(() => import('./pages/MaintenancePreventive'))
+const CalendarMaintenance = lazy(() => import('./pages/CalendarMaintenance'))
+const DashboardSuperviseur = lazy(() => import('./pages/DashboardSuperviseur'))
+const SchemaInteractif = lazy(() => import('./pages/SchemaInteractif'))
+const BaseConnaissances = lazy(() => import('./pages/BaseConnaissances'))
+const QrLookup = lazy(() => import('./pages/QrLookup'))
+const QuickPanne = lazy(() => import('./pages/QuickPanne'))
 
 function PageLoader() {
   return (
@@ -55,17 +61,23 @@ function AppRoutes() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Suspense fallback={<PageLoader />}><Dashboard /></Suspense>} />
+        <Route path="schema" element={<Suspense fallback={<PageLoader />}><SchemaInteractif /></Suspense>} />
+        <Route path="base-connaissances" element={<Suspense fallback={<PageLoader />}><BaseConnaissances /></Suspense>} />
         <Route path="machines" element={<Suspense fallback={<PageLoader />}><Machines /></Suspense>} />
         <Route path="machines/:id" element={<Suspense fallback={<PageLoader />}><MachineDetail /></Suspense>} />
+        <Route path="equipement/:code" element={<Suspense fallback={<PageLoader />}><QrLookup /></Suspense>} />
         <Route path="lignes" element={<Suspense fallback={<PageLoader />}><Lignes /></Suspense>} />
         <Route path="lignes/:ligne" element={<Suspense fallback={<PageLoader />}><LigneDetail /></Suspense>} />
         <Route path="pannes" element={<Suspense fallback={<PageLoader />}><Pannes /></Suspense>} />
         <Route path="pannes/:id" element={<Suspense fallback={<PageLoader />}><PanneDetail /></Suspense>} />
         <Route path="pannes/:id/rapport" element={<Suspense fallback={<PageLoader />}><RapportPanne /></Suspense>} />
         <Route path="maintenance-preventive" element={<Suspense fallback={<PageLoader />}><MaintenancePreventive /></Suspense>} />
+        <Route path="maintenance-preventive/calendar" element={<Suspense fallback={<PageLoader />}><CalendarMaintenance /></Suspense>} />
+        <Route path="dashboard-superviseur" element={<Suspense fallback={<PageLoader />}><DashboardSuperviseur /></Suspense>} />
         <Route path="interventions" element={<Suspense fallback={<PageLoader />}><Interventions /></Suspense>} />
         <Route path="pieces" element={<Suspense fallback={<PageLoader />}><Pieces /></Suspense>} />
         <Route path="recherche" element={<Suspense fallback={<PageLoader />}><Recherche /></Suspense>} />
+        <Route path="quick-panne" element={<Suspense fallback={<PageLoader />}><QuickPanne /></Suspense>} />
         <Route path="utilisateurs" element={<AdminRoute><Suspense fallback={<PageLoader />}><Utilisateurs /></Suspense></AdminRoute>} />
         <Route path="activite" element={<AdminRoute><Suspense fallback={<PageLoader />}><Activite /></Suspense></AdminRoute>} />
       </Route>

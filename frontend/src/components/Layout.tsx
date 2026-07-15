@@ -2,16 +2,19 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Wrench, AlertTriangle, ClipboardList,
-  Package, Search, LogOut, Users, BarChart2, RefreshCw, Factory
+  Package, Search, LogOut, Users, BarChart2, RefreshCw, Factory,
+  Map, BookOpen, ChevronDown
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { to: '/schema', label: 'Schéma Interactif', icon: Map },
+  { to: '/base-connaissances', label: 'Base Connaissances', icon: BookOpen },
   { to: '/lignes', label: 'Lignes & Process', icon: Factory },
   { to: '/machines', label: 'Machines', icon: Wrench },
   { to: '/pannes', label: 'Pannes', icon: AlertTriangle },
-  { to: '/interventions', label: 'Interventions', icon: ClipboardList },
+  { to: '/interventions', label: 'Bons de Travail', icon: ClipboardList },
   { to: '/pieces', label: 'Pièces', icon: Package },
   { to: '/maintenance-preventive', label: 'Prévention', icon: RefreshCw },
   { to: '/recherche', label: 'Recherche', icon: Search },

@@ -11,6 +11,8 @@ class InterventionBase(BaseModel):
     commentaire: Optional[str] = None
     photos_avant: Optional[List[str]] = []
     photos_apres: Optional[List[str]] = []
+    type_bt: Optional[str] = "reparation"
+    statut: Optional[str] = "en_cours"
     date_intervention: Optional[datetime] = None
 
 
@@ -26,6 +28,8 @@ class InterventionUpdate(BaseModel):
     photos_apres: Optional[List[str]] = None
     validee: Optional[bool] = None
     validee_par: Optional[str] = None
+    type_bt: Optional[str] = None
+    statut: Optional[str] = None
 
 
 class InterventionOut(InterventionBase):

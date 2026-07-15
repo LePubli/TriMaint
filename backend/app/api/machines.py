@@ -82,6 +82,8 @@ def get_schema_data(
                 "ligne": m.ligne,
                 "pos_x": m.pos_x,
                 "pos_y": m.pos_y,
+                "couleur": m.couleur,
+                "taille_pastille": m.taille_pastille,
                 "type": "machine",
             }
             for m in machines

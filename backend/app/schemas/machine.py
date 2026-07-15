@@ -16,6 +16,8 @@ class MachineBase(BaseModel):
     notes: Optional[str] = None
     pos_x: Optional[float] = None
     pos_y: Optional[float] = None
+    couleur: Optional[str] = None
+    taille_pastille: Optional[int] = None
 
 
 class MachineCreate(MachineBase):

@@ -21,6 +21,8 @@ class Machine(Base):
     notes = Column(Text)
     pos_x = Column(Float, nullable=True)
     pos_y = Column(Float, nullable=True)
+    couleur = Column(String(7), nullable=True)  # hex color e.g. #22c55e
+    taille_pastille = Column(Integer, nullable=True)  # px, default rendered as 28
     heures_fonctionnement = Column(Float, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

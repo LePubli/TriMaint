@@ -2,15 +2,16 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import toast from 'react-hot-toast'
 import {
   ZoomIn, ZoomOut, Maximize2, ArrowLeft,
   Search, X, Filter, MapPin, Layers, QrCode,
-  ChevronUp, ChevronDown, Thermometer
+  Thermometer, Pencil, Save, GripVertical
 } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════════
    TriMaint – Schéma Interactif (Photo + Hotspots)
-   Mobile-first responsive avec pinch-to-zoom
+   Mobile-first responsive avec pinch-to-zoom + MODE ÉDITION
    ═══════════════════════════════════════════════════════════════════ */
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -37,12 +38,14 @@ interface HeatmapData {
   machines: HeatmapMachineData[]
 }
 
-// ─── Coordinate mapping (DB → % of image) ────────────────────────
+// ─── Coordinate mapping (DB ↔ % of image) ────────────────────────
 const MAP = { minX: 5.2, maxX: 157.2, minY: 4.4, maxY: 111.7 }
 const rangeX = MAP.maxX - MAP.minX
 const rangeY = MAP.maxY - MAP.minY
 const toPctX = (x: number) => ((x - MAP.minX) / rangeX) * 100
 const toPctY = (y: number) => ((y - MAP.minY) / rangeY) * 100
+const fromPctX = (pct: number) => MAP.minX + (pct / 100) * rangeX
+const fromPctY = (pct: number) => MAP.minY + (pct / 100) * rangeY
 
 // ─── Zone definitions ─────────────────────────────────────────────
 const ZONE_DEFS: Record<string, { label: string; color: string; border: string }> = {
@@ -71,8 +74,32 @@ const STATUT_DOT: Record<string, string> = {
   operationnel: '#22c55e', en_panne: '#ef4444', maintenance: '#f97316', arret: '#6b7280',
 }
 
+const STATUT_OPTIONS = [
+  { value: 'operationnel', label: 'Opérationnel', color: '#22c55e' },
+  { value: 'en_panne',     label: 'En panne',     color: '#ef4444' },
+  { value: 'maintenance',  label: 'Maintenance',  color: '#f97316' },
+  { value: 'arret',        label: 'À l\'arrêt',   color: '#6b7280' },
+]
+
+const TYPE_OPTIONS = Object.entries(TYPE_CONFIG).map(([k, v]) => ({ value: k, label: v.label, color: v.color }))
+const ZONE_OPTIONS = Object.entries(ZONE_DEFS).map(([k, v]) => ({ value: k, label: v.label, color: v.color }))
+
 // ─── Hotspot size (responsive) ────────────────────────────────────
 const HOTSPOT_PX = 28
+
+// ─── Edit form interface ──────────────────────────────────────────
+interface EditForm {
+  nom: string
+  code_interne: string
+  zone: string
+  etage: string
+  ligne: string
+  type: string
+  statut: string
+  notes: string
+  pos_x: string
+  pos_y: string
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  MAIN COMPONENT
@@ -80,6 +107,7 @@ const HOTSPOT_PX = 28
 export default function SchemaInteractif() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const isManager = user?.role === 'manager' || user?.role === 'admin'
 
   // ─── State ────────────────────────────────────────────────────
   const [data, setData] = useState<SchemaData>({ machines: [], zones: [], etages: [], lignes: [] })
@@ -94,12 +122,24 @@ export default function SchemaInteractif() {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [selectedEtage, setSelectedEtage] = useState<number | null>(null)
   const [showFilters, setShowFilters] = useState(false)
-  const [showPanel, setShowPanel] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [imgLoaded, setImgLoaded] = useState(false)
   const [imgNatural, setImgNatural] = useState({ w: 0, h: 0 })
   const [heatmapMode, setHeatmapMode] = useState(false)
   const [heatmapData, setHeatmapData] = useState<HeatmapData | null>(null)
+
+  // ─── Edit mode state ──────────────────────────────────────────
+  const [editMode, setEditMode] = useState(false)
+  const [editingMachine, setEditingMachine] = useState<SchemaMachine | null>(null)
+  const [editForm, setEditForm] = useState<EditForm>({
+    nom: '', code_interne: '', zone: '', etage: '0', ligne: '',
+    type: 'equipement', statut: 'operationnel', notes: '', pos_x: '', pos_y: ''
+  })
+  const [saving, setSaving] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+
+  // ─── Drag state for hotspot repositioning ─────────────────────
+  const [draggingId, setDraggingId] = useState<number | null>(null)
 
   // Refs for touch handling
   const containerRef = useRef<HTMLDivElement>(null)
@@ -122,10 +162,10 @@ export default function SchemaInteractif() {
   }, [heatmapData])
 
   const getHeatmapColor = (count: number): string => {
-    if (count === 0) return 'rgba(34, 197, 94, 0.25)'   // green
-    if (count <= 3)  return 'rgba(234, 179, 8, 0.35)'    // yellow
-    if (count <= 7)  return 'rgba(249, 115, 22, 0.40)'   // orange
-    return 'rgba(239, 68, 68, 0.50)'                      // red
+    if (count === 0) return 'rgba(34, 197, 94, 0.25)'
+    if (count <= 3)  return 'rgba(234, 179, 8, 0.35)'
+    if (count <= 7)  return 'rgba(249, 115, 22, 0.40)'
+    return 'rgba(239, 68, 68, 0.50)'
   }
 
   const getHeatmapTextColor = (count: number): string => {
@@ -213,6 +253,7 @@ export default function SchemaInteractif() {
   })
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (editMode && draggingId !== null) return
     if (e.touches.length === 2) {
       lastTouchDist.current = getTouchDist(e.touches)
       lastTouchCenter.current = getTouchCenter(e.touches)
@@ -223,18 +264,17 @@ export default function SchemaInteractif() {
         px: pan.x, py: pan.y
       }
     }
-  }, [pan])
+  }, [pan, editMode, draggingId])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault()
+    if (editMode && draggingId !== null) return
     if (e.touches.length === 2) {
-      // Pinch zoom
       const dist = getTouchDist(e.touches)
       const center = getTouchCenter(e.touches)
       if (lastTouchDist.current > 0) {
         const scale = dist / lastTouchDist.current
         const newZoom = Math.max(0.3, Math.min(8, zoom * scale))
-        // Pan towards pinch center
         const dx = center.x - lastTouchCenter.current.x
         const dy = center.y - lastTouchCenter.current.y
         setZoom(newZoom)
@@ -247,7 +287,7 @@ export default function SchemaInteractif() {
       const dy = e.touches[0].clientY - dragStart.current.y
       setPan({ x: dragStart.current.px + dx, y: dragStart.current.py + dy })
     }
-  }, [zoom])
+  }, [zoom, editMode, draggingId])
 
   const handleTouchEnd = useCallback(() => {
     isDragging.current = false
@@ -256,19 +296,161 @@ export default function SchemaInteractif() {
 
   // ─── Mouse pan (desktop) ────────────────────────────────────
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (editMode && draggingId !== null) return
     if ((e.target as Element).closest('[data-hotspot]')) return
     isDragging.current = true
     dragStart.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }
-  }, [pan])
+  }, [pan, editMode, draggingId])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    // Hotspot drag in edit mode
+    if (editMode && draggingId !== null) {
+      const imgEl = containerRef.current?.querySelector('img')
+      if (!imgEl) return
+      const rect = imgEl.getBoundingClientRect()
+      const mouseXInImg = (e.clientX - rect.left) / zoom
+      const mouseYInImg = (e.clientY - rect.top) / zoom
+      const pctX = (mouseXInImg / rect.width) * 100
+      const pctY = (mouseYInImg / rect.height) * 100
+      const clampedX = Math.max(0, Math.min(100, pctX))
+      const clampedY = Math.max(0, Math.min(100, pctY))
+
+      setData(prev => ({
+        ...prev,
+        machines: prev.machines.map(m =>
+          m.id === draggingId
+            ? { ...m, pos_x: parseFloat(fromPctX(clampedX).toFixed(1)), pos_y: parseFloat(fromPctY(clampedY).toFixed(1)) }
+            : m
+        )
+      }))
+      return
+    }
     if (!isDragging.current) return
     const dx = e.clientX - dragStart.current.x
     const dy = e.clientY - dragStart.current.y
     setPan({ x: dragStart.current.px + dx, y: dragStart.current.py + dy })
+  }, [editMode, draggingId, zoom])
+
+  const handleMouseUp = useCallback(() => {
+    if (editMode && draggingId !== null) {
+      const machine = data.machines.find(m => m.id === draggingId)
+      if (machine && machine.pos_x && machine.pos_y) {
+        savePosition(draggingId, machine.pos_x, machine.pos_y)
+      }
+      setDraggingId(null)
+    }
+    isDragging.current = false
+  }, [editMode, draggingId, data.machines])
+
+  // ─── Hotspot drag start ─────────────────────────────────────
+  const handleHotspotMouseDown = useCallback((e: React.MouseEvent, m: SchemaMachine) => {
+    if (!editMode) return
+    e.stopPropagation()
+    e.preventDefault()
+    setDraggingId(m.id)
+    setSelectedMachine(m)
+  }, [editMode])
+
+  // ─── Hotspot touch drag start (mobile edit mode) ────────────
+  const handleHotspotTouchStart = useCallback((e: React.TouchEvent, m: SchemaMachine) => {
+    if (!editMode || e.touches.length !== 1) return
+    e.stopPropagation()
+    setDraggingId(m.id)
+    setSelectedMachine(m)
+  }, [editMode])
+
+  // ─── Hotspot touch move (mobile edit mode) ──────────────────
+  const handleHotspotTouchMove = useCallback((e: React.TouchEvent) => {
+    if (draggingId === null) return
+    e.preventDefault()
+    e.stopPropagation()
+    const imgEl = containerRef.current?.querySelector('img')
+    if (!imgEl || e.touches.length !== 1) return
+    const rect = imgEl.getBoundingClientRect()
+    const touchXInImg = (e.touches[0].clientX - rect.left) / zoom
+    const touchYInImg = (e.touches[0].clientY - rect.top) / zoom
+    const pctX = (touchXInImg / rect.width) * 100
+    const pctY = (touchYInImg / rect.height) * 100
+    const clampedX = Math.max(0, Math.min(100, pctX))
+    const clampedY = Math.max(0, Math.min(100, pctY))
+
+    setData(prev => ({
+      ...prev,
+      machines: prev.machines.map(m =>
+        m.id === draggingId
+          ? { ...m, pos_x: parseFloat(fromPctX(clampedX).toFixed(1)), pos_y: parseFloat(fromPctY(clampedY).toFixed(1)) }
+          : m
+      )
+    }))
+  }, [draggingId, zoom])
+
+  // ─── Hotspot touch end (mobile edit mode) ───────────────────
+  const handleHotspotTouchEnd = useCallback(() => {
+    if (draggingId !== null) {
+      const machine = data.machines.find(m => m.id === draggingId)
+      if (machine && machine.pos_x && machine.pos_y) {
+        savePosition(draggingId, machine.pos_x, machine.pos_y)
+      }
+      setDraggingId(null)
+    }
+  }, [draggingId, data.machines])
+
+  // ─── Save position ──────────────────────────────────────────
+  const savePosition = useCallback(async (machineId: number, posX: number, posY: number) => {
+    try {
+      await api.put(`/machines/${machineId}`, { pos_x: posX, pos_y: posY })
+      toast.success('Position mise à jour', { duration: 2000, icon: '📍' })
+    } catch {
+      toast.error('Erreur sauvegarde position')
+    }
   }, [])
 
-  const handleMouseUp = useCallback(() => { isDragging.current = false }, [])
+  // ─── Open edit modal ────────────────────────────────────────
+  const openEditModal = useCallback((m: SchemaMachine) => {
+    setEditingMachine(m)
+    setEditForm({
+      nom: m.nom || '',
+      code_interne: m.code_interne || '',
+      zone: m.zone || '',
+      etage: String(m.etage ?? 0),
+      ligne: m.ligne || '',
+      type: m.type || 'equipement',
+      statut: m.statut || 'operationnel',
+      notes: '',
+      pos_x: m.pos_x ? String(m.pos_x) : '',
+      pos_y: m.pos_y ? String(m.pos_y) : '',
+    })
+    setShowEditModal(true)
+  }, [])
+
+  // ─── Save edit form ─────────────────────────────────────────
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingMachine) return
+    setSaving(true)
+    try {
+      const payload: Record<string, unknown> = {
+        nom: editForm.nom,
+        code_interne: editForm.code_interne || null,
+        zone: editForm.zone || null,
+        etage: parseInt(editForm.etage) || 0,
+        ligne: editForm.ligne || null,
+        type: editForm.type,
+        statut: editForm.statut,
+        pos_x: editForm.pos_x ? parseFloat(editForm.pos_x) : null,
+        pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
+      }
+      if (editForm.notes.trim()) payload.notes = editForm.notes
+      await api.put(`/machines/${editingMachine.id}`, payload)
+      toast.success(`${editForm.code_interne || editForm.nom} mis à jour`, { duration: 3000 })
+      setShowEditModal(false)
+      setEditingMachine(null)
+      fetchData()
+    } catch {
+      toast.error('Erreur lors de la sauvegarde')
+    } finally {
+      setSaving(false)
+    }
+  }, [editingMachine, editForm, fetchData])
 
   // ─── Toggle helpers ─────────────────────────────────────────
   const toggleZone = useCallback((z: string) => {
@@ -337,9 +519,25 @@ export default function SchemaInteractif() {
           <span className="text-gray-500 text-xs shrink-0 hidden sm:inline">
             {filteredMachines.length}/{data.machines.length}
           </span>
+          {editMode && (
+            <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wider bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/30">
+              Mode Édition
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          {isManager && (
+            <button
+              onClick={() => { setEditMode(!editMode); setDraggingId(null) }}
+              className={`p-1.5 rounded-lg hover:bg-gray-700 transition-colors ${
+                editMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-300'
+              }`}
+              title={editMode ? 'Quitter le mode édition' : 'Mode édition : déplacer et modifier les pastilles'}
+            >
+              {editMode ? <Save size={18} /> : <Pencil size={18} />}
+            </button>
+          )}
           <button onClick={() => setShowSearch(!showSearch)}
                   className={`p-1.5 rounded-lg hover:bg-gray-700 ${showSearch ? 'text-blue-400' : 'text-gray-300'}`}>
             <Search size={18} />
@@ -368,6 +566,19 @@ export default function SchemaInteractif() {
         </div>
       </div>
 
+      {/* ─── Edit mode hint bar ──────────────────────────────── */}
+      {editMode && (
+        <div className="px-3 py-1.5 bg-amber-900/30 border-b border-amber-700/30 shrink-0 z-20 flex items-center gap-2 text-amber-300 text-xs">
+          <GripVertical size={14} className="shrink-0" />
+          <span className="hidden sm:inline">
+            Glissez une pastille pour la déplacer. Cliquez pour modifier ses informations.
+          </span>
+          <span className="sm:hidden">
+            Glissez pour déplacer. Cliquez pour modifier.
+          </span>
+        </div>
+      )}
+
       {/* ─── Search bar ───────────────────────────────────────── */}
       {showSearch && (
         <div className="px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0 z-20">
@@ -390,12 +601,11 @@ export default function SchemaInteractif() {
         </div>
       )}
 
-      {/* ─── Filter panel (slide-down on mobile, sidebar on desktop) ── */}
+      {/* ─── Filter panel ─────────────────────────────────────── */}
       {showFilters && (
         <div className={`${isMobile ? '' : 'absolute left-0 top-[52px] z-20'} bg-gray-800 border-b border-gray-700
                           ${isMobile ? 'shrink-0' : 'w-60 rounded-br-lg shadow-xl'}`}>
           <div className="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
-            {/* Étage */}
             <div>
               <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
                 <Layers size={12} /> Étage
@@ -413,8 +623,6 @@ export default function SchemaInteractif() {
                 ))}
               </div>
             </div>
-
-            {/* Zones */}
             <div>
               <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
                 <MapPin size={12} /> Zones
@@ -434,8 +642,6 @@ export default function SchemaInteractif() {
                 ))}
               </div>
             </div>
-
-            {/* Types */}
             <div>
               <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
                 <QrCode size={12} /> Types
@@ -454,8 +660,6 @@ export default function SchemaInteractif() {
                 ))}
               </div>
             </div>
-
-            {/* Reset */}
             <button onClick={resetView}
                     className="w-full py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-xs">
               Réinitialiser
@@ -467,7 +671,7 @@ export default function SchemaInteractif() {
       {/* ─── Main canvas: image + hotspots ──────────────────────── */}
       <div
         ref={containerRef}
-        className="flex-1 relative overflow-hidden bg-gray-950 touch-none select-none"
+        className={`flex-1 relative overflow-hidden bg-gray-950 touch-none select-none ${editMode ? 'cursor-crosshair' : ''}`}
         onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -477,7 +681,6 @@ export default function SchemaInteractif() {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        {/* Transform container: zoom + pan */}
         <div
           className="absolute origin-top-left"
           style={{
@@ -485,7 +688,6 @@ export default function SchemaInteractif() {
             willChange: 'transform',
           }}
         >
-          {/* The process image */}
           <img
             src="/process2.jpg"
             alt="Schéma de process Trisélec"
@@ -495,41 +697,30 @@ export default function SchemaInteractif() {
             draggable={false}
           />
 
-          {/* Hotspots layer (same size as image, positioned on top) */}
           {imgLoaded && (
-            <div
-              className="absolute inset-0"
-              style={{ pointerEvents: 'none' }}
-            >
-              {/* ─── Heatmap zone overlays ────────────────────────── */}
+            <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
+              {/* Heatmap zone overlays */}
               {heatmapMode && heatmapData && Object.entries(heatmapData.zones).map(([zoneKey, zoneData]) => {
                 const bounds = ZONE_BOUNDS[zoneKey]
                 if (!bounds) return null
                 const count = zoneData.open_pannes + zoneData.recent_pannes
                 return (
-                  <div
-                    key={zoneKey}
-                    className="absolute flex items-center justify-center"
+                  <div key={zoneKey} className="absolute flex items-center justify-center"
                     style={{
-                      left: `${bounds.x1}%`,
-                      top: `${bounds.y1}%`,
-                      width: `${bounds.x2 - bounds.x1}%`,
-                      height: `${bounds.y2 - bounds.y1}%`,
-                      background: getHeatmapColor(count),
-                      borderRadius: 12,
+                      left: `${bounds.x1}%`, top: `${bounds.y1}%`,
+                      width: `${bounds.x2 - bounds.x1}%`, height: `${bounds.y2 - bounds.y1}%`,
+                      background: getHeatmapColor(count), borderRadius: 12,
                       border: '1px solid rgba(255,255,255,0.08)',
-                    }}
-                  >
-                    <span
-                      className="font-bold text-lg drop-shadow-lg"
-                      style={{ color: getHeatmapTextColor(count), textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}
-                    >
+                    }}>
+                    <span className="font-bold text-lg drop-shadow-lg"
+                      style={{ color: getHeatmapTextColor(count), textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>
                       {count}
                     </span>
                   </div>
                 )
               })}
 
+              {/* Machine hotspots */}
               {data.machines.map(m => {
                 if (!m.pos_x || !m.pos_y) return null
                 if (!visibleIds.has(m.id)) return null
@@ -538,9 +729,10 @@ export default function SchemaInteractif() {
                 const top = toPctY(m.pos_y)
                 const isHovered = hoveredId === m.id
                 const isSearch = searchMatch?.id === m.id
+                const isDrag = draggingId === m.id
                 const tc = TYPE_CONFIG[m.type]
                 const sc = STATUT_DOT[m.statut] || '#6b7280'
-                const size = isHovered || isSearch ? HOTSPOT_PX + 8 : HOTSPOT_PX
+                const size = isHovered || isSearch || isDrag ? HOTSPOT_PX + 8 : HOTSPOT_PX
 
                 return (
                   <div
@@ -548,43 +740,68 @@ export default function SchemaInteractif() {
                     data-hotspot="true"
                     className="absolute group"
                     style={{
-                      left: `${left}%`,
-                      top: `${top}%`,
+                      left: `${left}%`, top: `${top}%`,
                       transform: 'translate(-50%, -50%)',
                       pointerEvents: 'auto',
-                      cursor: 'pointer',
+                      cursor: editMode ? 'grab' : 'pointer',
+                      zIndex: isDrag ? 100 : 10,
                     }}
-                    onClick={(e) => { e.stopPropagation(); setSelectedMachine(m) }}
+                    onMouseDown={(e) => {
+                      if (editMode) {
+                        handleHotspotMouseDown(e, m)
+                      } else {
+                        e.stopPropagation(); setSelectedMachine(m)
+                      }
+                    }}
                     onMouseEnter={() => setHoveredId(m.id)}
                     onMouseLeave={() => setHoveredId(null)}
+                    onClick={(e) => {
+                      if (editMode && !isDrag) {
+                        e.stopPropagation()
+                        // Open edit panel/sidebar but don't start drag
+                      } else if (!editMode) {
+                        e.stopPropagation(); setSelectedMachine(m)
+                      }
+                    }}
+                    onTouchStart={(e) => handleHotspotTouchStart(e, m)}
+                    onTouchMove={(e) => handleHotspotTouchMove(e)}
+                    onTouchEnd={handleHotspotTouchEnd}
                   >
                     {/* Pulse ring for search match */}
                     {isSearch && (
                       <div className="absolute inset-0 rounded-full animate-ping bg-yellow-400 opacity-40"
                            style={{ width: size + 12, height: size + 12, margin: -(size + 12 - size) / 2 }} />
                     )}
-
-                    {/* Pulsing red ring in heatmap mode for machines with open pannes */}
+                    {/* Pulsing red ring in heatmap mode */}
                     {heatmapMode && heatmapMachineMap.get(m.id)?.panne_count ? (
                       <div className="absolute inset-0 rounded-full animate-ping bg-red-500 opacity-60"
                            style={{ width: size + 14, height: size + 14, margin: -(size + 14 - size) / 2 }} />
                     ) : null}
-
+                    {/* Edit mode glow ring */}
+                    {editMode && !isDrag && (
+                      <div className="absolute inset-0 rounded-full border-2 border-amber-400/50 animate-pulse"
+                           style={{ width: size + 6, height: size + 6, margin: -(size + 6 - size) / 2 }} />
+                    )}
+                    {/* Drag active ring */}
+                    {isDrag && (
+                      <div className="absolute inset-0 rounded-full border-2 border-amber-400"
+                           style={{ width: size + 10, height: size + 10, margin: -(size + 10 - size) / 2, boxShadow: '0 0 20px rgba(251,191,36,0.5)' }} />
+                    )}
                     {/* Hotspot dot */}
                     <div
                       className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
                       style={{
-                        width: size,
-                        height: size,
-                        borderColor: isHovered ? '#60a5fa' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef4444' : sc,
-                        background: (isHovered || isSearch) ? (tc?.color || '#60a5fa') + 'cc' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef444488' : sc + '88',
-                        boxShadow: (isHovered || isSearch) ? `0 0 12px ${tc?.color || '#60a5fa'}66` :
-                                   (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '0 0 10px rgba(239,68,68,0.5)' : 'none',
+                        width: size, height: size,
+                        borderColor: isDrag ? '#fbbf24' : isHovered ? '#60a5fa' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef4444' : sc,
+                        background: isDrag ? '#fbbf24cc' : (isHovered || isSearch) ? (tc?.color || '#60a5fa') + 'cc' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef444488' : sc + '88',
+                        boxShadow: isDrag ? '0 0 16px rgba(251,191,36,0.6)' :
+                                   (isHovered || isSearch) ? `0 0 12px ${tc?.color || '#60a5fa'}66` :
+                                   (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '0 0 10px rgba(239,68,68,0.5)' :
+                                   editMode ? '0 0 6px rgba(251,191,36,0.3)' : 'none',
                       }}
                     >
-                      {/* Type icon letter */}
                       <span className="text-white font-bold"
-                            style={{ fontSize: isHovered ? 11 : 9, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
+                            style={{ fontSize: isHovered || isDrag ? 11 : 9, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
                         {m.type === 'convoyeur' ? 'C' :
                          m.type === 'broyeur' ? 'B' :
                          m.type === 'automate' ? 'A' :
@@ -592,19 +809,21 @@ export default function SchemaInteractif() {
                          m.type === 'crible' ? 'Cr' : '?'}
                       </span>
                     </div>
-
-                    {/* Desktop tooltip on hover */}
-                    {!isMobile && isHovered && (
+                    {/* Desktop tooltip - view mode */}
+                    {!isMobile && isHovered && !editMode && (
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-900/95 border border-gray-600 rounded-lg px-3 py-2 whitespace-nowrap z-50 shadow-xl pointer-events-none">
                         <div className="text-white font-bold text-sm">{m.code_interne || m.nom}</div>
-                        <div className="text-gray-400 text-xs">
-                          {tc?.label || m.type} · {m.zone}
-                        </div>
-                        <div className="text-xs mt-0.5" style={{ color: sc }}>
-                          {m.statut}
-                        </div>
-                        {/* Arrow */}
+                        <div className="text-gray-400 text-xs">{tc?.label || m.type} · {m.zone}</div>
+                        <div className="text-xs mt-0.5" style={{ color: sc }}>{m.statut}</div>
                         <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900/95" />
+                      </div>
+                    )}
+                    {/* Desktop tooltip - edit mode */}
+                    {!isMobile && isHovered && editMode && !isDrag && (
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-amber-900/95 border border-amber-600 rounded-lg px-3 py-2 whitespace-nowrap z-50 shadow-xl pointer-events-none">
+                        <div className="text-amber-100 font-bold text-sm">{m.code_interne || m.nom}</div>
+                        <div className="text-amber-300/70 text-xs">Glisser ou cliquer pour modifier</div>
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-amber-900/95" />
                       </div>
                     )}
                   </div>
@@ -614,38 +833,151 @@ export default function SchemaInteractif() {
           )}
         </div>
 
-        {/* Zoom indicator (bottom-left) */}
         <div className="absolute bottom-3 left-3 bg-gray-800/80 rounded-lg px-2 py-1 text-gray-400 text-xs backdrop-blur-sm">
           {Math.round(zoom * 100)}%
         </div>
       </div>
 
-      {/* ─── Mobile bottom sheet ──────────────────────────────── */}
-      {isMobile && selectedMachine && (
+      {/* ═══════════════════════════════════════════════════════════
+          EDIT MODAL
+         ═══════════════════════════════════════════════════════════ */}
+      {showEditModal && editingMachine && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowEditModal(false)} />
+          <div className="relative bg-gray-800 border border-gray-600 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-gray-800 rounded-t-2xl border-b border-gray-700 px-5 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-white font-bold text-lg">Modifier l'équipement</h2>
+                <p className="text-gray-400 text-xs mt-0.5">ID: {editingMachine.id}</p>
+              </div>
+              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-white p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Nom</label>
+                <input type="text" value={editForm.nom}
+                  onChange={e => setEditForm(f => ({ ...f, nom: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Code interne</label>
+                <input type="text" value={editForm.code_interne}
+                  onChange={e => setEditForm(f => ({ ...f, code_interne: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 uppercase"
+                  placeholder="Ex: L101" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Type</label>
+                  <select value={editForm.type}
+                    onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    {TYPE_OPTIONS.map(t => (<option key={t.value} value={t.value}>{t.label}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Statut</label>
+                  <select value={editForm.statut}
+                    onChange={e => setEditForm(f => ({ ...f, statut: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    {STATUT_OPTIONS.map(s => (<option key={s.value} value={s.value}>{s.label}</option>))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Zone</label>
+                  <select value={editForm.zone}
+                    onChange={e => setEditForm(f => ({ ...f, zone: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="">— Aucune —</option>
+                    {ZONE_OPTIONS.map(z => (<option key={z.value} value={z.value}>{z.label}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Étage</label>
+                  <select value={editForm.etage}
+                    onChange={e => setEditForm(f => ({ ...f, etage: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="0">E0 (RDC)</option>
+                    <option value="1">E1</option>
+                    <option value="2">E2</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Ligne</label>
+                <input type="text" value={editForm.ligne}
+                  onChange={e => setEditForm(f => ({ ...f, ligne: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                  placeholder="Ex: Ligne 1" />
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Notes</label>
+                <textarea value={editForm.notes}
+                  onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 resize-none"
+                  placeholder="Notes optionnelles..." />
+              </div>
+              <div className="bg-gray-700/30 rounded-lg p-3">
+                <label className="block text-gray-400 text-xs font-medium mb-2">Position sur le schéma</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-gray-500 text-[10px] mb-1">pos_x</label>
+                    <input type="number" step="0.1" value={editForm.pos_x}
+                      onChange={e => setEditForm(f => ({ ...f, pos_x: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500 font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 text-[10px] mb-1">pos_y</label>
+                    <input type="number" step="0.1" value={editForm.pos_y}
+                      onChange={e => setEditForm(f => ({ ...f, pos_y: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500 font-mono" />
+                  </div>
+                </div>
+                <p className="text-gray-500 text-[10px] mt-1.5">Glissez la pastille sur le schéma ou saisissez les coordonnées manuellement.</p>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setShowEditModal(false)}
+                  className="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl font-medium transition-colors text-sm">
+                  Annuler
+                </button>
+                <button onClick={handleSaveEdit}
+                  disabled={saving || !editForm.nom.trim()}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded-xl font-bold transition-colors text-sm flex items-center justify-center gap-2">
+                  {saving ? (
+                    <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Sauvegarde...</>
+                  ) : (
+                    <><Save size={16} /> Enregistrer</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Mobile bottom sheet (view mode) ──────────────────── */}
+      {isMobile && selectedMachine && !editMode && (
         <div className="fixed inset-0 z-40" onClick={() => setSelectedMachine(null)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div
-            className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl max-h-[70vh] overflow-y-auto animate-slide-up"
-            onClick={e => e.stopPropagation()}
-          >
+          <div className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl max-h-[70vh] overflow-y-auto animate-slide-up"
+            onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 bg-gray-800 pt-3 pb-2 px-4 border-b border-gray-700">
               <div className="w-10 h-1 bg-gray-600 rounded-full mx-auto mb-3" />
               <div className="flex items-center justify-between">
-                <h2 className="text-white font-bold text-lg">
-                  {selectedMachine.code_interne || selectedMachine.nom}
-                </h2>
-                <button onClick={() => setSelectedMachine(null)} className="text-gray-400 p-1">
-                  <X size={20} />
-                </button>
+                <h2 className="text-white font-bold text-lg">{selectedMachine.code_interne || selectedMachine.nom}</h2>
+                <button onClick={() => setSelectedMachine(null)} className="text-gray-400 p-1"><X size={20} /></button>
               </div>
             </div>
             <div className="p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full"
-                      style={{ background: STATUT_DOT[selectedMachine.statut] || '#6b7280' }} />
-                <span className="text-sm capitalize" style={{ color: STATUT_DOT[selectedMachine.statut] || '#6b7280' }}>
-                  {selectedMachine.statut}
-                </span>
+                <span className="w-3 h-3 rounded-full" style={{ background: STATUT_DOT[selectedMachine.statut] || '#6b7280' }} />
+                <span className="text-sm capitalize" style={{ color: STATUT_DOT[selectedMachine.statut] || '#6b7280' }}>{selectedMachine.statut}</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="bg-gray-700/50 rounded-lg p-3">
@@ -666,7 +998,7 @@ export default function SchemaInteractif() {
                 </div>
               </div>
               <button onClick={() => goToMachine(selectedMachine)}
-                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-semibold transition-colors">
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-semibold transition-colors">
                 Voir la fiche complète
               </button>
             </div>
@@ -674,15 +1006,64 @@ export default function SchemaInteractif() {
         </div>
       )}
 
-      {/* ─── Desktop detail panel ────────────────────────────── */}
-      {!isMobile && selectedMachine && (
+      {/* ─── Mobile bottom sheet (edit mode) ──────────────────── */}
+      {isMobile && selectedMachine && editMode && draggingId === null && (
+        <div className="fixed inset-0 z-40" onClick={() => setSelectedMachine(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl max-h-[70vh] overflow-y-auto animate-slide-up"
+            onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-gray-800 pt-3 pb-2 px-4 border-b border-amber-700/30">
+              <div className="w-10 h-1 bg-amber-600 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <h2 className="text-amber-100 font-bold text-lg">{selectedMachine.code_interne || selectedMachine.nom}</h2>
+                <button onClick={() => setSelectedMachine(null)} className="text-gray-400 p-1"><X size={20} /></button>
+              </div>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="flex items-center gap-2 text-amber-300 text-xs">
+                <GripVertical size={14} />
+                <span>Glissez la pastille pour déplacer</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="bg-gray-700/50 rounded-lg p-3">
+                  <div className="text-gray-500 text-xs">Type</div>
+                  <div className="text-white font-medium">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type}</div>
+                </div>
+                <div className="bg-gray-700/50 rounded-lg p-3">
+                  <div className="text-gray-500 text-xs">Zone</div>
+                  <div className="text-white font-medium">{selectedMachine.zone || '—'}</div>
+                </div>
+                <div className="bg-gray-700/50 rounded-lg p-3">
+                  <div className="text-gray-500 text-xs">pos_x</div>
+                  <div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_x?.toFixed(1) || '—'}</div>
+                </div>
+                <div className="bg-gray-700/50 rounded-lg p-3">
+                  <div className="text-gray-500 text-xs">pos_y</div>
+                  <div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_y?.toFixed(1) || '—'}</div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => openEditModal(selectedMachine)}
+                  className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 text-sm">
+                  <Pencil size={16} /> Modifier les infos
+                </button>
+                <button onClick={() => goToMachine(selectedMachine)}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-semibold transition-colors text-sm">
+                  Voir la fiche
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Desktop detail panel (view mode) ──────────────────── */}
+      {!isMobile && selectedMachine && !editMode && (
         <div className="absolute right-0 top-[52px] bottom-0 w-80 bg-gray-800 border-l border-gray-700 z-20 overflow-y-auto shadow-2xl">
           <div className="p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-white font-semibold">Détail Équipement</h3>
-              <button onClick={() => setSelectedMachine(null)} className="text-gray-400 hover:text-white">
-                <X size={18} />
-              </button>
+              <button onClick={() => setSelectedMachine(null)} className="text-gray-400 hover:text-white"><X size={18} /></button>
             </div>
             <div className="space-y-3">
               <div className="bg-gray-700/50 rounded-lg p-3">
@@ -710,13 +1091,63 @@ export default function SchemaInteractif() {
               <div className="bg-gray-700/30 rounded-lg p-3">
                 <div className="text-gray-500 text-xs mb-1">Statut</div>
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full"
-                        style={{ background: STATUT_DOT[selectedMachine.statut] || '#6b7280' }} />
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: STATUT_DOT[selectedMachine.statut] || '#6b7280' }} />
                   <span className="text-white font-medium capitalize">{selectedMachine.statut}</span>
                 </div>
               </div>
               <button onClick={() => goToMachine(selectedMachine)}
-                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors text-sm">
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors text-sm">
+                Voir la fiche complète
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Desktop detail panel (edit mode) ────────────────── */}
+      {!isMobile && selectedMachine && editMode && draggingId === null && (
+        <div className="absolute right-0 top-[52px] bottom-0 w-80 bg-gray-800 border-l border-amber-700/30 z-20 overflow-y-auto shadow-2xl">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-amber-100 font-semibold">Modifier l'équipement</h3>
+              <button onClick={() => setSelectedMachine(null)} className="text-gray-400 hover:text-white"><X size={18} /></button>
+            </div>
+            <div className="space-y-3">
+              <div className="bg-gray-700/50 rounded-lg p-3 border border-amber-700/20">
+                <div className="text-xl font-bold text-white">{selectedMachine.code_interne || selectedMachine.nom}</div>
+                <div className="text-sm text-gray-400 mt-0.5">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type} · {selectedMachine.zone}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="bg-gray-700/30 rounded-lg p-2">
+                  <div className="text-gray-500 text-xs">Statut</div>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className="w-2 h-2 rounded-full" style={{ background: STATUT_DOT[selectedMachine.statut] || '#6b7280' }} />
+                    <span className="text-white font-medium capitalize text-xs">{selectedMachine.statut}</span>
+                  </div>
+                </div>
+                <div className="bg-gray-700/30 rounded-lg p-2">
+                  <div className="text-gray-500 text-xs">Étage</div>
+                  <div className="text-white font-medium">E{selectedMachine.etage}</div>
+                </div>
+                <div className="bg-gray-700/30 rounded-lg p-2">
+                  <div className="text-gray-500 text-xs">pos_x</div>
+                  <div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_x?.toFixed(1) || '—'}</div>
+                </div>
+                <div className="bg-gray-700/30 rounded-lg p-2">
+                  <div className="text-gray-500 text-xs">pos_y</div>
+                  <div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_y?.toFixed(1) || '—'}</div>
+                </div>
+              </div>
+              <div className="bg-amber-900/20 border border-amber-700/20 rounded-lg p-3 text-amber-200 text-xs space-y-1">
+                <p className="font-semibold">Mode édition actif</p>
+                <p>Glissez la pastille sur le schéma pour la repositionner. La position est sauvegardée automatiquement au relâchement.</p>
+              </div>
+              <button onClick={() => openEditModal(selectedMachine)}
+                className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold transition-colors text-sm flex items-center justify-center gap-2">
+                <Pencil size={16} /> Modifier les informations
+              </button>
+              <button onClick={() => goToMachine(selectedMachine)}
+                className="w-full py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg font-medium transition-colors text-sm">
                 Voir la fiche complète
               </button>
             </div>

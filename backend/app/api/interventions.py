@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional, List
 from app.db.database import get_db
 from app.models.intervention import Intervention
 from app.schemas.intervention import InterventionCreate, InterventionUpdate, InterventionOut
@@ -9,12 +11,27 @@ from app.core.notifications import create_notification
 
 router = APIRouter(prefix="/api/interventions", tags=["interventions"])
 
+VALID_TYPES_BT = ["reparation", "nettoyage", "entretien"]
+VALID_STATUTS = ["en_cours", "termine", "valide"]
+
 
 @router.get("/", response_model=list[InterventionOut])
-def list_interventions(skip: int = 0, limit: int = 100, machine_id: int = None, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def list_interventions(
+    skip: int = 0,
+    limit: int = 100,
+    machine_id: int = None,
+    type_bt: str = None,
+    statut: str = None,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
     q = db.query(Intervention)
     if machine_id:
         q = q.filter(Intervention.machine_id == machine_id)
+    if type_bt and type_bt in VALID_TYPES_BT:
+        q = q.filter(Intervention.type_bt == type_bt)
+    if statut and statut in VALID_STATUTS:
+        q = q.filter(Intervention.statut == statut)
     return q.order_by(Intervention.date_intervention.desc()).offset(skip).limit(limit).all()
 
 
@@ -32,12 +49,12 @@ def create_intervention(inter_in: InterventionCreate, db: Session = Depends(get_
     db.add(inter)
     db.commit()
     db.refresh(inter)
-    label = inter.description[:60] if inter.description else f"Intervention #{inter.id}"
+    label = inter.commentaire[:60] if inter.commentaire else f"BT {inter.type_bt} #{inter.id}"
     log_activity(db, current_user, "créé", "intervention", inter.id, label)
     create_notification(
         db,
-        title="Nouvelle intervention à valider",
-        message=f"{label} — soumise par {current_user.username}",
+        title=f"Nouveau BT {inter.type_bt}",
+        message=f"{label} — soumis par {current_user.username}",
         notif_type="info",
         entity_type="intervention",
         entity_id=inter.id,
@@ -54,7 +71,7 @@ def update_intervention(intervention_id: int, inter_in: InterventionUpdate, db: 
         setattr(inter, key, value)
     db.commit()
     db.refresh(inter)
-    label = inter.description[:60] if inter.description else f"Intervention #{inter.id}"
+    label = inter.commentaire[:60] if inter.commentaire else f"BT {inter.type_bt} #{inter.id}"
     log_activity(db, current_user, "modifié", "intervention", inter.id, label)
     return inter
 
@@ -66,10 +83,24 @@ def valider_intervention(intervention_id: int, db: Session = Depends(get_db), cu
         raise HTTPException(status_code=404, detail="Intervention not found")
     inter.validee = True
     inter.validee_par = current_user.username
+    inter.statut = "valide"
     db.commit()
     db.refresh(inter)
-    label = inter.description[:60] if inter.description else f"Intervention #{inter.id}"
+    label = inter.commentaire[:60] if inter.commentaire else f"BT {inter.type_bt} #{inter.id}"
     log_activity(db, current_user, "validé", "intervention", inter.id, label)
+    return inter
+
+
+@router.post("/{intervention_id}/terminer", response_model=InterventionOut)
+def terminer_intervention(intervention_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    inter = db.query(Intervention).filter(Intervention.id == intervention_id).first()
+    if not inter:
+        raise HTTPException(status_code=404, detail="Intervention not found")
+    inter.statut = "termine"
+    db.commit()
+    db.refresh(inter)
+    label = inter.commentaire[:60] if inter.commentaire else f"BT {inter.type_bt} #{inter.id}"
+    log_activity(db, current_user, "terminé", "intervention", inter.id, label)
     return inter
 
 
@@ -78,7 +109,7 @@ def delete_intervention(intervention_id: int, db: Session = Depends(get_db), cur
     inter = db.query(Intervention).filter(Intervention.id == intervention_id).first()
     if not inter:
         raise HTTPException(status_code=404, detail="Intervention not found")
-    label = inter.description[:60] if inter.description else f"Intervention #{inter.id}"
+    label = inter.commentaire[:60] if inter.commentaire else f"BT {inter.type_bt} #{inter.id}"
     db.delete(inter)
     db.commit()
     log_activity(db, current_user, "supprimé", "intervention", intervention_id, label)

@@ -4,7 +4,7 @@ import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import {
   ArrowLeft, AlertTriangle, ClipboardList, Wrench, Package,
-  Edit2, Save, X, CheckCircle, Clock, ChevronRight, Plus, FileText
+  Edit2, Save, X, CheckCircle, Clock, ChevronRight, Plus, FileText, Sparkles
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -48,6 +48,10 @@ export default function PanneDetail() {
   const [pieceForm, setPieceForm] = useState({ piece_id: '', quantite: '1', deduire_stock: true })
   const [removingPiece, setRemovingPiece] = useState<number | null>(null)
 
+  // Auto-suggestion pièces
+  const [suggestedPieces, setSuggestedPieces] = useState<any[]>([])
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+
   const fetchPanne = useCallback(() => {
     api.get(`/pannes/${id}/detail`)
       .then(r => {
@@ -83,7 +87,7 @@ export default function PanneDetail() {
     } catch { toast.error('Erreur') }
   }
 
-  // Ouvre le formulaire ajout pièce + charge la liste
+  // Ouvre le formulaire ajout pièce + charge la liste + suggestions
   const openAddPiece = () => {
     if (allPieces.length === 0) {
       api.get('/pieces/').then(r => setAllPieces(r.data))
@@ -91,6 +95,15 @@ export default function PanneDetail() {
     setPieceForm({ piece_id: '', quantite: '1', deduire_stock: true })
     setPieceSearch('')
     setShowAddPiece(true)
+    // Fetch auto-suggestions
+    setLoadingSuggestions(true)
+    api.get(`/kpi/pieces-suggest`, {
+      params: { machine_id: panne?.machine_id, panne_titre: panne?.titre }
+    }).then(r => {
+      setSuggestedPieces(r.data || [])
+    }).catch(() => {
+      setSuggestedPieces([])
+    }).finally(() => setLoadingSuggestions(false))
   }
 
   const addPiece = async (e: React.FormEvent) => {
@@ -335,6 +348,14 @@ export default function PanneDetail() {
           <Section
             title="Pièces utilisées"
             icon={<Package size={16} className="text-purple-400" />}
+            action={
+              <button
+                onClick={openAddPiece}
+                className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+              >
+                <Plus size={12} /> Ajouter
+              </button>
+            }
           >
             {panne.pieces_detail?.length === 0 ? (
               <p className="text-gray-600 text-sm italic">Aucune pièce renseignée.</p>
@@ -382,6 +403,110 @@ export default function PanneDetail() {
           </Section>
         </div>
       </div>
+
+      {/* Modal : Ajouter une pièce */}
+      {showAddPiece && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-2xl w-full max-w-md border border-gray-700 shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0">
+              <h3 className="text-white font-semibold">Ajouter une pièce</h3>
+              <button onClick={() => setShowAddPiece(false)} className="text-gray-400 hover:text-white"><X size={18} /></button>
+            </div>
+            <form onSubmit={addPiece} className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+              {/* Auto-suggestions */}
+              {loadingSuggestions ? (
+                <div className="flex items-center gap-2 text-gray-500 text-sm py-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-orange-500" />
+                  <span>Chargement des suggestions...</span>
+                </div>
+              ) : suggestedPieces.length > 0 ? (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Sparkles size={13} className="text-orange-400" />
+                    <span className="text-xs font-semibold text-gray-400 uppercase">Pièces suggérées</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {suggestedPieces.map((sp: any) => (
+                      <button
+                        key={sp.piece_id || sp.id}
+                        type="button"
+                        onClick={() => setPieceForm(f => ({ ...f, piece_id: String(sp.piece_id || sp.id) }))}
+                        className={`flex flex-col items-start px-3 py-2 rounded-lg border text-left transition-colors min-h-[44px] ${
+                          pieceForm.piece_id === String(sp.piece_id || sp.id)
+                            ? 'bg-orange-500/20 border-orange-500 text-orange-300'
+                            : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-orange-500/50 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-xs font-medium font-mono">{sp.reference}</span>
+                        <span className="text-xs opacity-80 truncate max-w-[150px]">{sp.nom}</span>
+                        <span className="text-[10px] text-gray-500">utilisée {sp.occurrences || sp.count || 0} fois</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Manual piece search */}
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1.5">Rechercher une pièce</label>
+                <div className="relative">
+                  <input
+                    value={pieceSearch}
+                    onChange={e => setPieceSearch(e.target.value)}
+                    placeholder="Référence ou nom..."
+                    className={inputCls}
+                  />
+                </div>
+                {pieceSearch && (
+                  <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+                    {allPieces
+                      .filter(p =>
+                        (p.reference || '').toLowerCase().includes(pieceSearch.toLowerCase()) ||
+                        (p.nom || '').toLowerCase().includes(pieceSearch.toLowerCase())
+                      )
+                      .slice(0, 10)
+                      .map(p => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => { setPieceForm(f => ({ ...f, piece_id: String(p.id) })); setPieceSearch(p.reference || p.nom) }}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                            pieceForm.piece_id === String(p.id) ? 'bg-orange-500/20 text-orange-300' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          }`}
+                        >
+                          <span className="font-mono text-xs">{p.reference}</span> — {p.nom}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1.5">Quantité</label>
+                <input
+                  type="number" min="1" value={pieceForm.quantite}
+                  onChange={e => setPieceForm(f => ({ ...f, quantite: e.target.value }))}
+                  className={inputCls}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+                <input
+                  type="checkbox" checked={pieceForm.deduire_stock}
+                  onChange={e => setPieceForm(f => ({ ...f, deduire_stock: e.target.checked }))}
+                  className="rounded border-gray-600 bg-gray-700 text-orange-500 focus:ring-orange-500"
+                />
+                Déduire du stock
+              </label>
+
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setShowAddPiece(false)} className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors">Annuler</button>
+                <button type="submit" className="flex-1 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors">Ajouter</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal : Nouvelle intervention */}
       {showInterModal && (

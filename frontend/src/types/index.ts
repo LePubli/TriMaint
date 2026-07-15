@@ -22,6 +22,7 @@ export interface Machine {
   site: string | null
   ligne: string | null
   zone: string | null
+  etage: number | null
   fabricant: string | null
   modele: string | null
   code_interne: string | null
@@ -61,8 +62,29 @@ export interface Intervention {
   photos_apres: string[]
   validee: boolean
   validee_par: string | null
+  type_bt: string
+  statut: string
   date_intervention: string | null
   created_at: string
+}
+
+export interface Convoyeur {
+  id: number
+  nom: string
+  code_interne: string | null
+  ligne: string | null
+  zone: string | null
+  etage: number | null
+  type_convoyeur: string
+  source_machine_id: number | null
+  target_machine_id: number | null
+  statut: string
+  longueur_m: number | null
+  vitesse: string | null
+  path_points: { x: number; y: number }[]
+  notes: string | null
+  created_at: string
+  updated_at: string | null
 }
 
 export interface Piece {

@@ -8,6 +8,7 @@ class MachineBase(BaseModel):
     site: Optional[str] = None
     ligne: Optional[str] = None
     zone: Optional[str] = None
+    etage: Optional[int] = 0
     fabricant: Optional[str] = None
     modele: Optional[str] = None
     code_interne: Optional[str] = None

@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import { Search, Wrench, AlertTriangle, ClipboardList, Loader2 } from 'lucide-react'
+import { Search, Wrench, AlertTriangle, ClipboardList, Loader2, Mic, MicOff } from 'lucide-react'
 
 interface SearchResult {
   machines: { id: number; nom: string; code_interne?: string; statut: string }[]
@@ -9,11 +9,46 @@ interface SearchResult {
   interventions: { id: number; technicien: string; machine_id: number }[]
 }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+const speechSupported = !!SpeechRecognition
+
 export default function Recherche() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [listening, setListening] = useState(false)
+  const recognitionRef = useRef<any>(null)
   const navigate = useNavigate()
+
+  const toggleVoice = () => {
+    if (!SpeechRecognition) return
+    if (listening && recognitionRef.current) {
+      recognitionRef.current.stop()
+      setListening(false)
+      return
+    }
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'fr-FR'
+    recognition.interimResults = false
+    recognition.maxAlternatives = 1
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript
+      setQuery(transcript)
+      setListening(false)
+    }
+    recognition.onerror = () => setListening(false)
+    recognition.onend = () => setListening(false)
+    recognitionRef.current = recognition
+    recognition.start()
+    setListening(true)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) recognitionRef.current.abort()
+    }
+  }, [])
 
   useEffect(() => {
     if (!query.trim() || query.length < 2) { setResults(null); return }
@@ -37,12 +72,29 @@ export default function Recherche() {
 
       <div className="relative mb-6">
         <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-        {loading && <Loader2 size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />}
+        {speechSupported && (
+          <button
+            type="button"
+            onClick={toggleVoice}
+            className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors ${listening ? 'bg-red-900/60 text-red-400 hover:bg-red-900/80' : 'text-gray-400 hover:text-white'}`}
+            title={listening ? 'Arrêter la reconnaissance vocale' : 'Recherche vocale'}
+          >
+            {listening ? (
+              <span className="relative flex items-center justify-center">
+                <span className="absolute inline-flex h-6 w-6 rounded-full bg-red-500/40 animate-ping" />
+                <MicOff size={16} className="relative" />
+              </span>
+            ) : (
+              <Mic size={16} />
+            )}
+          </button>
+        )}
+        {!speechSupported || !listening ? loading && <Loader2 size={16} className="absolute right-12 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" /> : null}
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Nom de machine, code interne, panne, technicien..."
-          className="w-full pl-11 pr-10 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+          className={`w-full pl-11 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 ${speechSupported ? 'pr-12' : 'pr-10'}`}
           autoFocus
         />
       </div>

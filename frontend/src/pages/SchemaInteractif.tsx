@@ -308,10 +308,10 @@ export default function SchemaInteractif() {
       const imgEl = containerRef.current?.querySelector('img')
       if (!imgEl) return
       const rect = imgEl.getBoundingClientRect()
-      const mouseXInImg = (e.clientX - rect.left) / zoom
-      const mouseYInImg = (e.clientY - rect.top) / zoom
-      const pctX = (mouseXInImg / rect.width) * 100
-      const pctY = (mouseYInImg / rect.height) * 100
+      // getBoundingClientRect() already reflects CSS transforms (zoom+pan),
+      // so we work directly in screen-space — no extra /zoom needed.
+      const pctX = ((e.clientX - rect.left) / rect.width) * 100
+      const pctY = ((e.clientY - rect.top) / rect.height) * 100
       const clampedX = Math.max(0, Math.min(100, pctX))
       const clampedY = Math.max(0, Math.min(100, pctY))
 
@@ -367,10 +367,9 @@ export default function SchemaInteractif() {
     const imgEl = containerRef.current?.querySelector('img')
     if (!imgEl || e.touches.length !== 1) return
     const rect = imgEl.getBoundingClientRect()
-    const touchXInImg = (e.touches[0].clientX - rect.left) / zoom
-    const touchYInImg = (e.touches[0].clientY - rect.top) / zoom
-    const pctX = (touchXInImg / rect.width) * 100
-    const pctY = (touchYInImg / rect.height) * 100
+    // getBoundingClientRect() already reflects CSS transforms (zoom+pan)
+    const pctX = ((e.touches[0].clientX - rect.left) / rect.width) * 100
+    const pctY = ((e.touches[0].clientY - rect.top) / rect.height) * 100
     const clampedX = Math.max(0, Math.min(100, pctX))
     const clampedY = Math.max(0, Math.min(100, pctY))
 

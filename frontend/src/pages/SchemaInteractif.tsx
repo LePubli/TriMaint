@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import {
   ZoomIn, ZoomOut, Maximize2, ArrowLeft,
   Search, X, Filter, MapPin, Layers, QrCode,
-  Thermometer, Pencil, Save, GripVertical, Trash2, Plus, Palette
+  Thermometer, Pencil, Save, GripVertical, Trash2, Plus, Palette, CheckSquare, Square
 } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -118,6 +118,8 @@ export default function SchemaInteractif() {
 
   // Edit mode
   const [editMode, setEditMode] = useState(false)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [editingMachine, setEditingMachine] = useState<SchemaMachine | null>(null)
   const [editForm, setEditForm] = useState<EditForm>(emptyForm())
   const [saving, setSaving] = useState(false)
@@ -128,6 +130,7 @@ export default function SchemaInteractif() {
 
   // Drag
   const [draggingId, setDraggingId] = useState<number | null>(null)
+  const [deletingBatch, setDeletingBatch] = useState(false)
 
   // Smooth zoom transition
   const [smoothTransition, setSmoothTransition] = useState(false)
@@ -439,7 +442,13 @@ export default function SchemaInteractif() {
       await api.post('/machines/', payload)
       toast.success(`${editForm.nom} créé`, { duration: 3000 })
       setShowCreateModal(false); fetchData()
-    } catch { toast.error('Erreur lors de la création') }
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || ''
+      if (msg.includes('unique') || msg.includes('duplicate') || msg.includes('code_interne'))
+        toast.error(`Code interne "${editForm.code_interne}" déjà utilisé`, { duration: 4000 })
+      else
+        toast.error(msg || 'Erreur lors de la création')
+    }
     finally { setSaving(false) }
   }, [editForm, fetchData])
 
@@ -449,10 +458,39 @@ export default function SchemaInteractif() {
     try {
       await api.delete(`/machines/${id}`)
       toast.success(`${nom} supprimé`, { duration: 3000 })
-      setSelectedMachine(null); setShowEditModal(false); fetchData()
+      setSelectedMachine(null); setShowEditModal(false)
+      setSelectedIds(prev => { const s = new Set(prev); s.delete(id); return s })
+      fetchData()
     } catch { toast.error('Erreur lors de la suppression') }
     finally { setDeletingId(null) }
   }, [fetchData])
+
+  // ─── Multi-select toggle ────────────────────────────────────
+  const toggleSelectId = useCallback((id: number) => {
+    setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  }, [])
+
+  // ─── Batch delete selected ───────────────────────────────────
+  const handleBatchDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    const count = selectedIds.size
+    if (!confirm(`Supprimer ${count} équipement${count > 1 ? 's' : ''} ?`)) return
+    setDeletingBatch(true)
+    let ok = 0, fail = 0
+    for (const id of selectedIds) {
+      try { await api.delete(`/machines/${id}`); ok++ } catch { fail++ }
+    }
+    setDeletingBatch(false)
+    setSelectedIds(new Set()); setSelectedMachine(null); fetchData()
+    toast.success(`${ok} supprimé${ok > 1 ? 's' : ''}${fail ? `, ${fail} erreur${fail > 1 ? 's' : ''}` : ''}`, { duration: 3000 })
+  }, [selectedIds, fetchData])
+
+  // ─── Toggle edit mode (resets multi-select) ─────────────────
+  const toggleEditMode = useCallback(() => {
+    const next = !editMode
+    setEditMode(next)
+    if (!next) { setMultiSelectMode(false); setSelectedIds(new Set()); setDraggingId(null) }
+  }, [editMode])
 
   // ─── Toggle helpers ─────────────────────────────────────────
   const toggleZone = useCallback((z: string) => setHiddenZones(p => { const s = new Set(p); s.has(z) ? s.delete(z) : s.add(z); return s }), [])
@@ -509,10 +547,17 @@ export default function SchemaInteractif() {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {isManager && (
-            <button onClick={() => { setEditMode(!editMode); setDraggingId(null) }}
+            <button onClick={toggleEditMode}
               className={`p-1.5 rounded-lg hover:bg-gray-700 transition-colors ${editMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-300'}`}
               title={editMode ? 'Quitter le mode édition' : 'Mode édition'}>
               {editMode ? <Save size={18} /> : <Pencil size={18} />}
+            </button>
+          )}
+          {editMode && (
+            <button onClick={() => { setMultiSelectMode(!multiSelectMode); if (multiSelectMode) setSelectedIds(new Set()) }}
+              className={`p-1.5 rounded-lg hover:bg-gray-700 transition-colors ${multiSelectMode ? 'text-blue-400 bg-blue-400/10' : 'text-gray-300'}`}
+              title={multiSelectMode ? 'Quitter la sélection multiple' : 'Sélection multiple'}>
+              {multiSelectMode ? <CheckSquare size={18} /> : <Square size={18} />}
             </button>
           )}
           <button onClick={() => setShowSearch(!showSearch)} className={`p-1.5 rounded-lg hover:bg-gray-700 ${showSearch ? 'text-blue-400' : 'text-gray-300'}`}>
@@ -535,8 +580,8 @@ export default function SchemaInteractif() {
       {editMode && (
         <div className="px-3 py-1.5 bg-amber-900/30 border-b border-amber-700/30 shrink-0 z-20 flex items-center gap-2 text-amber-300 text-xs">
           <Plus size={14} className="shrink-0" />
-          <span className="hidden sm:inline">Double-cliquez pour ajouter une pastille. Glissez pour déplacer. Cliquez pour modifier/supprimer.</span>
-          <span className="sm:hidden">Double-clic: ajouter. Glisser: déplacer.</span>
+          <span className="hidden sm:inline">{multiSelectMode ? 'Cliquez sur les pastilles à supprimer. Barre d\'action en bas.' : 'Double-cliquez pour ajouter. Glissez pour déplacer. Cliquez pour modifier.'}</span>
+          <span className="sm:hidden">{multiSelectMode ? 'Cliquez pour sélectionner.' : 'Double-clic: ajouter. Glisser: déplacer.'}</span>
         </div>
       )}
 
@@ -635,21 +680,40 @@ export default function SchemaInteractif() {
                 const isHovered = hoveredId === m.id, isSearch = searchMatch?.id === m.id, isDrag = draggingId === m.id
                 const tc = TYPE_CONFIG[m.type], sc = getColor(m)
                 const baseSize = getSize(m)
+                const isSelected = selectedIds.has(m.id)
                 const size = isHovered || isSearch || isDrag ? baseSize + 8 : baseSize
 
                 return (
                   <div key={m.id} data-hotspot="true" className="absolute group"
-                    style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%, -50%)', pointerEvents: 'auto', cursor: editMode ? 'grab' : 'pointer', zIndex: isDrag ? 100 : 10 }}
-                    onMouseDown={(e) => editMode ? handleHotspotMouseDown(e, m) : (e.stopPropagation(), setSelectedMachine(m))}
+                    style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%, -50%)', pointerEvents: 'auto',
+                      cursor: multiSelectMode ? 'pointer' : editMode ? 'grab' : 'pointer', zIndex: isDrag ? 100 : isSelected ? 50 : 10 }}
+                    onMouseDown={(e) => {
+                      if (multiSelectMode) { e.stopPropagation(); toggleSelectId(m.id); return }
+                      if (editMode) { handleHotspotMouseDown(e, m); return }
+                      e.stopPropagation(); setSelectedMachine(m)
+                    }}
                     onMouseEnter={() => setHoveredId(m.id)} onMouseLeave={() => setHoveredId(null)}
-                    onClick={(e) => { if (!editMode) { e.stopPropagation(); setSelectedMachine(m) } }}
+                    onClick={(e) => {
+                      if (multiSelectMode) { e.stopPropagation(); toggleSelectId(m.id); return }
+                      if (!editMode) { e.stopPropagation(); setSelectedMachine(m) }
+                    }}
                     onTouchStart={(e) => handleHotspotTouchStart(e, m)}
                     onTouchMove={(e) => handleHotspotTouchMove(e)}
                     onTouchEnd={handleHotspotTouchEnd}
                   >
                     {isSearch && (<div className="absolute inset-0 rounded-full animate-ping bg-yellow-400 opacity-40" style={{ width: size + 12, height: size + 12, margin: -(size + 12 - size) / 2 }} />)}
                     {heatmapMode && heatmapMachineMap.get(m.id)?.panne_count && (<div className="absolute inset-0 rounded-full animate-ping bg-red-500 opacity-60" style={{ width: size + 14, height: size + 14, margin: -(size + 14 - size) / 2 }} />)}
-                    {editMode && !isDrag && (<div className="absolute inset-0 rounded-full border-2 border-amber-400/50 animate-pulse" style={{ width: size + 6, height: size + 6, margin: -(size + 6 - size) / 2 }} />)}
+                    {editMode && !isDrag && !isSelected && (<div className="absolute inset-0 rounded-full border-2 border-amber-400/50 animate-pulse" style={{ width: size + 6, height: size + 6, margin: -(size + 6 - size) / 2 }} />)}
+                    {isSelected && (
+                      <div className="absolute inset-0 rounded-full border-3 border-blue-400 bg-blue-400/20"
+                        style={{ width: size + 8, height: size + 8, margin: -(size + 8 - size) / 2, boxShadow: '0 0 12px rgba(96,165,250,0.5)' }}>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     {isDrag && (<div className="absolute inset-0 rounded-full border-2 border-amber-400" style={{ width: size + 10, height: size + 10, margin: -(size + 10 - size) / 2, boxShadow: '0 0 20px rgba(251,191,36,0.5)' }} />)}
 
                     <div className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
@@ -963,6 +1027,25 @@ export default function SchemaInteractif() {
               </button>
               <button onClick={() => goToMachine(selectedMachine)} className="w-full py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg font-medium transition-colors text-sm">Voir la fiche complète</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Multi-select batch action bar ──────────────────── */}
+      {multiSelectMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-gray-800 border-t border-blue-500/30 px-4 py-3 flex items-center justify-between"
+          style={isMobile ? { marginBottom: 40 } : {}}>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm">{selectedIds.size}</div>
+            <span className="text-white font-medium text-sm">{selectedIds.size} sélectionné{selectedIds.size > 1 ? 's' : ''}</span>
+            <button onClick={() => setSelectedIds(new Set())} className="text-gray-400 hover:text-white text-xs underline">Tout déselectionner</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handleBatchDelete} disabled={deletingBatch}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded-lg font-medium text-sm flex items-center gap-2 transition-colors">
+              {deletingBatch ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Trash2 size={16} />}
+              Supprimer
+            </button>
           </div>
         </div>
       )}

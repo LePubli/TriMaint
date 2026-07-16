@@ -16,9 +16,12 @@ const navItems = [
   { to: '/lignes', label: 'Lignes & Process', icon: Factory },
   { to: '/machines', label: 'Machines', icon: Wrench },
   { to: '/pannes', label: 'Pannes', icon: AlertTriangle },
+  { to: '/quick-panne', label: 'Signaler Panne', icon: AlertTriangle },
   { to: '/interventions', label: 'Bons de Travail', icon: ClipboardList },
   { to: '/pieces', label: 'Pièces', icon: Package },
   { to: '/maintenance-preventive', label: 'Prévention', icon: RefreshCw },
+  { to: '/maintenance-preventive/calendar', label: 'Calendrier', icon: Calendar },
+  { to: '/dashboard-superviseur', label: 'Dashboard Superviseur', icon: BarChart2 },
   { to: '/recherche', label: 'Recherche', icon: Search },
 ]
 

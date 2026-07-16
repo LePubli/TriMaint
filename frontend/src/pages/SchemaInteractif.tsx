@@ -2,109 +2,116 @@ import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import toast from 'react-hot-toast'
 import {
   ZoomIn, ZoomOut, Maximize2, ArrowLeft,
   Search, X, Filter, MapPin, Layers,
-  ChevronUp, ChevronDown, Thermometer
+  Thermometer, Pencil, Save, GripVertical, Trash2, Plus, Palette, CheckSquare, Square
 } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════════
-   TriMaint – Schéma Interactif (Photo + Hotspots)
-   Mobile-first responsive avec pinch-to-zoom + orientation
+   TriMaint – Schéma Interactif v2.3
+   Ajout/suppression pastilles · Zoom centré doux · Couleur/taille
    ═══════════════════════════════════════════════════════════════════ */
 
 // ─── Types ────────────────────────────────────────────────────────
 interface SchemaMachine {
   id: number; nom: string; code_interne: string | null; statut: string
   zone: string | null; etage: number | null; ligne: string | null
-  pos_x: number | null; pos_y: number | null; type: string; modele?: string | null
+  pos_x: number | null; pos_y: number | null; type: string
+  modele?: string | null; couleur?: string | null; taille_pastille?: number | null
 }
 interface SchemaData {
   machines: SchemaMachine[]; zones: string[]; etages: number[]; lignes: string[]
 }
-interface HeatmapZoneData {
-  open_pannes: number
-  recent_pannes: number
-  avg_criticite: number
-}
-interface HeatmapMachineData {
-  machine_id: number
-  panne_count: number
-  avg_criticite: number
-}
-interface HeatmapData {
-  zones: Record<string, HeatmapZoneData>
-  machines: HeatmapMachineData[]
-}
+interface HeatmapZoneData { open_pannes: number; recent_pannes: number; avg_criticite: number }
+interface HeatmapMachineData { machine_id: number; panne_count: number; avg_criticite: number }
+interface HeatmapData { zones: Record<string, HeatmapZoneData>; machines: HeatmapMachineData[] }
 
-// ─── Coordinate mapping (DB → % of image) ────────────────────────
+// ─── Coordinate mapping (DB ↔ % of image) ────────────────────────
 const MAP = { minX: 5.2, maxX: 157.2, minY: 4.4, maxY: 111.7 }
 const rangeX = MAP.maxX - MAP.minX
 const rangeY = MAP.maxY - MAP.minY
 const toPctX = (x: number) => ((x - MAP.minX) / rangeX) * 100
 const toPctY = (y: number) => ((y - MAP.minY) / rangeY) * 100
+const fromPctX = (pct: number) => MAP.minX + (pct / 100) * rangeX
+const fromPctY = (pct: number) => MAP.minY + (pct / 100) * rangeY
 
 // ─── Zone definitions ─────────────────────────────────────────────
 const ZONE_DEFS: Record<string, { label: string; color: string; border: string }> = {
-  'Entree':        { label: 'Réception',     color: '#43a047', border: '#66bb6a' },
-  'Pretri':        { label: 'Pré-tri',       color: '#f9a825', border: '#fdd835' },
-  'Triage':        { label: 'Triage',        color: '#1e88e5', border: '#42a5f5' },
-  'TriageOptique': { label: 'Tri optique',   color: '#ff8f00', border: '#ffb300' },
-  'Affinage':      { label: 'Affinage',      color: '#00897b', border: '#26a69a' },
-  'Compactage':    { label: 'Compactage',    color: '#e53935', border: '#ef5350' },
-  'Stockage':      { label: 'Stockage',      color: '#5e35b1', border: '#7e57c2' },
-  'Refus':         { label: 'Refus',         color: '#546e7a', border: '#78909c' },
+  'Entree':        { label: 'Réception',   color: '#43a047', border: '#66bb6a' },
+  'Pretri':        { label: 'Pré-tri',     color: '#f9a825', border: '#fdd835' },
+  'Triage':        { label: 'Triage',      color: '#1e88e5', border: '#42a5f5' },
+  'TriageOptique': { label: 'Tri optique', color: '#ff8f00', border: '#ffb300' },
+  'Affinage':      { label: 'Affinage',    color: '#00897b', border: '#26a69a' },
+  'Compactage':    { label: 'Compactage',  color: '#e53935', border: '#ef5350' },
+  'Stockage':      { label: 'Stockage',    color: '#5e35b1', border: '#7e57c2' },
+  'Refus':         { label: 'Refus',       color: '#546e7a', border: '#78909c' },
 }
 
-// ─── Equipment type config ────────────────────────────────────────
 const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-  convoyeur:    { label: 'Convoyeur',   color: '#f9a825' },
-  broyeur:      { label: 'Broyeur',     color: '#e53935' },
-  automate:     { label: 'Automate',    color: '#1565c0' },
-  deverseur:    { label: 'Déverseur',   color: '#7b1fa2' },
-  crible:       { label: 'Crible',      color: '#2e7d32' },
-  poste_arret:  { label: 'Poste arrêt', color: '#f57f17' },
-  equipement:   { label: 'Équipement',  color: '#546e7a' },
+  convoyeur:   { label: 'Convoyeur',   color: '#f9a825' },
+  broyeur:     { label: 'Broyeur',     color: '#e53935' },
+  automate:    { label: 'Automate',    color: '#1565c0' },
+  deverseur:   { label: 'Déverseur',   color: '#7b1fa2' },
+  crible:      { label: 'Crible',      color: '#2e7d32' },
+  poste_arret: { label: 'Poste arrêt', color: '#f57f17' },
+  equipement:  { label: 'Équipement',  color: '#546e7a' },
 }
 
 const STATUT_DOT: Record<string, string> = {
   operationnel: '#22c55e', en_panne: '#ef4444', maintenance: '#f97316', arret: '#6b7280',
 }
 
-// ─── Hotspot size (responsive) ────────────────────────────────────
+const STATUT_OPTIONS = [
+  { value: 'operationnel', label: 'Opérationnel' },
+  { value: 'en_panne',     label: 'En panne' },
+  { value: 'maintenance',  label: 'Maintenance' },
+  { value: 'arret',        label: 'À l\'arrêt' },
+]
+const TYPE_OPTIONS = Object.entries(TYPE_CONFIG).map(([k, v]) => ({ value: k, label: v.label }))
+const ZONE_OPTIONS = Object.entries(ZONE_DEFS).map(([k, v]) => ({ value: k, label: v.label }))
+const PRESET_COLORS = [
+  '#22c55e', '#ef4444', '#f97316', '#6b7280', '#3b82f6', '#8b5cf6',
+  '#ec4899', '#f59e0b', '#14b8a6', '#06b6d4', '#f43f5e', '#84cc16',
+]
+
 const HOTSPOT_PX = 28
+const MOBILE_HOTSPOT_PX = 18
 
 /** Truncate a machine name for inline display inside a pastille */
 function truncateName(name: string, max = 8): string {
   if (!name) return '?'
-  // For convoyeurs, try to extract a short code (e.g. "Convoyeur CV-201" → "CV-201")
   const cvMatch = name.match(/(?:convoyeur\s*)?([A-Z]{1,3}[-]?\d{1,4}[A-Z]?)/i)
   if (cvMatch && cvMatch[1].length <= max) return cvMatch[1]
-  // For short names, use as-is
   if (name.length <= max) return name
-  // Extract first meaningful word/abbreviation
   const words = name.split(/[\s_\-]+/).filter(Boolean)
   if (words.length > 1) {
-    // Try acronym: "Poste Arrêt 2" → "PA2"
     const acronym = words.map(w => w[0]?.toUpperCase()).join('')
     if (acronym.length >= 2 && acronym.length <= max) return acronym
-    // Return first word truncated
     return words[0].substring(0, max)
   }
   return name.substring(0, max)
 }
 
-// ─── Layout constants for mobile container sizing ─────────────────
-const TOP_HEADER_H = 56   // Layout top header h-14 = 56px
-const BOTTOM_NAV_H = 64   // Layout bottom nav h-16 = 64px
-const SCHEMA_TOP_BAR_H = 44  // Schema's own top bar
+// ─── Edit form ─────────────────────────────────────────────────────
+interface EditForm {
+  nom: string; code_interne: string; zone: string; etage: string
+  ligne: string; type: string; statut: string; notes: string
+  pos_x: string; pos_y: string; couleur: string; taille_pastille: string
+}
 
-// ═══════════════════════════════════════════════════════════════════
-//  MAIN COMPONENT
+const emptyForm = (): EditForm => ({
+  nom: '', code_interne: '', zone: '', etage: '0', ligne: '',
+  type: 'equipement', statut: 'operationnel', notes: '',
+  pos_x: '', pos_y: '', couleur: '', taille_pastille: '',
+})
+
 // ═══════════════════════════════════════════════════════════════════
 export default function SchemaInteractif() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const isManager = user?.role === 'manager' || user?.role === 'admin'
 
   // ─── State ────────────────────────────────────────────────────
   const [data, setData] = useState<SchemaData>({ machines: [], zones: [], etages: [], lignes: [] })
@@ -119,143 +126,73 @@ export default function SchemaInteractif() {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set())
   const [selectedEtage, setSelectedEtage] = useState<number | null>(null)
   const [showFilters, setShowFilters] = useState(false)
-  const [showPanel, setShowPanel] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [imgLoaded, setImgLoaded] = useState(false)
   const [imgNatural, setImgNatural] = useState({ w: 0, h: 0 })
   const [heatmapMode, setHeatmapMode] = useState(false)
   const [heatmapData, setHeatmapData] = useState<HeatmapData | null>(null)
-  const [isLandscape, setIsLandscape] = useState(false)
-  const [imgDisplaySize, setImgDisplaySize] = useState({ w: 0, h: 0 })
 
-  // Refs for touch handling
+  // Edit mode
+  const [editMode, setEditMode] = useState(false)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [editingMachine, setEditingMachine] = useState<SchemaMachine | null>(null)
+  const [editForm, setEditForm] = useState<EditForm>(emptyForm())
+  const [saving, setSaving] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createPos, setCreatePos] = useState({ pctX: 0, pctY: 0 })
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+
+  // Drag
+  const [draggingId, setDraggingId] = useState<number | null>(null)
+  const [deletingBatch, setDeletingBatch] = useState(false)
+
+  // Smooth zoom transition
+  const [smoothTransition, setSmoothTransition] = useState(false)
+
+  // Refs
   const containerRef = useRef<HTMLDivElement>(null)
   const lastTouchDist = useRef(0)
   const lastTouchCenter = useRef({ x: 0, y: 0 })
-  const isDragging = useRef(false)
+  const isPanning = useRef(false)
   const dragStart = useRef({ x: 0, y: 0, px: 0, py: 0 })
-  const lastTapTime = useRef(0)
-  const lastTapPos = useRef({ x: 0, y: 0 })
 
-  // ─── Fetch heatmap data when mode toggles on ───────────────
+  // ─── Heatmap ─────────────────────────────────────────────────
   useEffect(() => {
     if (!heatmapMode) { setHeatmapData(null); return }
     api.get('/kpi/heatmap').then(r => setHeatmapData(r.data)).catch(() => {})
   }, [heatmapMode])
 
-  // ─── Heatmap helpers ─────────────────────────────────────────
   const heatmapMachineMap = useMemo(() => {
     const map = new Map<number, HeatmapMachineData>()
     heatmapData?.machines.forEach(m => map.set(m.machine_id, m))
     return map
   }, [heatmapData])
 
-  const getHeatmapColor = (count: number): string => {
-    if (count === 0) return 'rgba(34, 197, 94, 0.25)'   // green
-    if (count <= 3)  return 'rgba(234, 179, 8, 0.35)'    // yellow
-    if (count <= 7)  return 'rgba(249, 115, 22, 0.40)'   // orange
-    return 'rgba(239, 68, 68, 0.50)'                      // red
+  const getHeatmapColor = (c: number) => {
+    if (c === 0) return 'rgba(34,197,94,0.25)'
+    if (c <= 3) return 'rgba(234,179,8,0.35)'
+    if (c <= 7) return 'rgba(249,115,22,0.40)'
+    return 'rgba(239,68,68,0.50)'
+  }
+  const getHeatmapTextColor = (c: number) => {
+    if (c === 0) return '#86efac'; if (c <= 3) return '#fde047'; if (c <= 7) return '#fdba74'; return '#fca5a5'
   }
 
-  const getHeatmapTextColor = (count: number): string => {
-    if (count === 0) return '#86efac'
-    if (count <= 3)  return '#fde047'
-    if (count <= 7)  return '#fdba74'
-    return '#fca5a5'
-  }
-
-  // ─── Zone bounding boxes (approximate % coordinates) ──────────
   const ZONE_BOUNDS: Record<string, { x1: number; y1: number; x2: number; y2: number }> = {
-    'Entree':        { x1: 0, y1: 0, x2: 18, y2: 30 },
-    'Pretri':        { x1: 18, y1: 0, x2: 38, y2: 35 },
-    'Triage':        { x1: 38, y1: 0, x2: 60, y2: 35 },
-    'TriageOptique': { x1: 60, y1: 0, x2: 78, y2: 30 },
-    'Affinage':      { x1: 38, y1: 35, x2: 60, y2: 70 },
-    'Compactage':    { x1: 60, y1: 30, x2: 82, y2: 65 },
-    'Stockage':      { x1: 78, y1: 30, x2: 100, y2: 70 },
-    'Refus':         { x1: 0, y1: 70, x2: 38, y2: 100 },
+    'Entree': { x1: 0, y1: 0, x2: 18, y2: 30 }, 'Pretri': { x1: 18, y1: 0, x2: 38, y2: 35 },
+    'Triage': { x1: 38, y1: 0, x2: 60, y2: 35 }, 'TriageOptique': { x1: 60, y1: 0, x2: 78, y2: 30 },
+    'Affinage': { x1: 38, y1: 35, x2: 60, y2: 70 }, 'Compactage': { x1: 60, y1: 30, x2: 82, y2: 65 },
+    'Stockage': { x1: 78, y1: 30, x2: 100, y2: 70 }, 'Refus': { x1: 0, y1: 70, x2: 38, y2: 100 },
   }
 
   // ─── Detect mobile ───────────────────────────────────────────
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
-    check()
-    window.addEventListener('resize', check)
+    check(); window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
-
-  // ─── Detect orientation (mobile only) ────────────────────────
-  useEffect(() => {
-    if (!isMobile) { setIsLandscape(false); return }
-
-    const check = () => {
-      const landscape = window.matchMedia('(orientation: landscape)').matches
-      setIsLandscape(landscape)
-    }
-    check()
-
-    // Listen for orientation change + resize
-    const mql = window.matchMedia('(orientation: landscape)')
-    mql.addEventListener('change', check)
-    window.addEventListener('orientationchange', check)
-    window.addEventListener('resize', check)
-    return () => {
-      mql.removeEventListener('change', check)
-      window.removeEventListener('orientationchange', check)
-      window.removeEventListener('resize', check)
-    }
-  }, [isMobile])
-
-  // ─── Compute image display size based on orientation ─────────
-  useEffect(() => {
-    if (!isMobile || !imgLoaded || imgNatural.w === 0) return
-
-    const updateSize = () => {
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-
-      // Available height: viewport - layout header - schema top bar - bottom nav - mobile toolbar(48px)
-      const mobileToolbarH = 48
-      const availH = vh - TOP_HEADER_H - SCHEMA_TOP_BAR_H - BOTTOM_NAV_H - mobileToolbarH
-      const availW = vw
-
-      const aspect = imgNatural.w / imgNatural.h
-
-      let displayW: number
-      let displayH: number
-
-      if (isLandscape) {
-        // In landscape: fit height, scale width proportionally
-        displayH = Math.max(100, availH)
-        displayW = displayH * aspect
-        // If it overflows width, fit width instead
-        if (displayW > availW) {
-          displayW = availW
-          displayH = displayW / aspect
-        }
-      } else {
-        // In portrait: fit width, scale height proportionally
-        displayW = availW
-        displayH = displayW / aspect
-        // If it overflows available height, fit height instead
-        if (displayH > availH) {
-          displayH = availH
-          displayW = displayH * aspect
-        }
-      }
-
-      setImgDisplaySize({ w: Math.round(displayW), h: Math.round(displayH) })
-    }
-
-    updateSize()
-
-    // Recalculate on resize and orientation change
-    window.addEventListener('resize', updateSize)
-    window.addEventListener('orientationchange', () => setTimeout(updateSize, 100))
-    return () => {
-      window.removeEventListener('resize', updateSize)
-    }
-  }, [isMobile, isLandscape, imgLoaded, imgNatural.w, imgNatural.h])
 
   // ─── Fetch data ──────────────────────────────────────────────
   const fetchData = useCallback(() => {
@@ -270,20 +207,14 @@ export default function SchemaInteractif() {
   // ─── Filtered machines ───────────────────────────────────────
   const filteredMachines = useMemo(() => {
     let items = data.machines
-    if (hiddenZones.size > 0)
-      items = items.filter(m => !hiddenZones.has(m.zone || ''))
-    if (hiddenTypes.size > 0)
-      items = items.filter(m => !hiddenTypes.has(m.type))
+    if (hiddenZones.size > 0) items = items.filter(m => !hiddenZones.has(m.zone || ''))
+    if (hiddenTypes.size > 0) items = items.filter(m => !hiddenTypes.has(m.type))
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
-      items = items.filter(m =>
-        (m.nom || '').toLowerCase().includes(q) ||
-        (m.code_interne || '').toLowerCase().includes(q)
-      )
+      items = items.filter(m => (m.nom || '').toLowerCase().includes(q) || (m.code_interne || '').toLowerCase().includes(q))
     }
     return items
   }, [data.machines, hiddenZones, hiddenTypes, searchQuery])
-
   const visibleIds = useMemo(() => new Set(filteredMachines.map(m => m.id)), [filteredMachines])
 
   // ─── Image load ─────────────────────────────────────────────
@@ -292,305 +223,428 @@ export default function SchemaInteractif() {
     setImgLoaded(true)
   }, [])
 
-  // ─── Zoom controls ──────────────────────────────────────────
-  const zoomIn = useCallback(() => setZoom(z => Math.min(8, z * 1.3)), [])
-  const zoomOut = useCallback(() => setZoom(z => Math.max(0.3, z / 1.3)), [])
-  const fitAll = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault()
-    const factor = e.deltaY < 0 ? 1.1 : 0.9
-    setZoom(z => Math.max(0.3, Math.min(8, z * factor)))
+  // ═══════════════════════════════════════════════════════════
+  //  ZOOM — centered on cursor, smooth transition
+  // ═══════════════════════════════════════════════════════════
+  const zoomTo = useCallback((newZoom: number, cx?: number, cy?: number) => {
+    const clamped = Math.max(0.3, Math.min(8, newZoom))
+    if (cx !== undefined && cy !== undefined && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      const mx = cx - rect.left
+      const my = cy - rect.top
+      const scale = clamped / zoom
+      setPan({ x: mx - (mx - pan.x) * scale, y: my - (my - pan.y) * scale })
+    }
+    setZoom(clamped)
+  }, [zoom, pan])
+
+  // Button zoom — centers on visible area center
+  const zoomIn = useCallback(() => {
+    setSmoothTransition(true)
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      zoomTo(zoom * 1.3, rect.left + rect.width / 2, rect.top + rect.height / 2)
+    } else { setZoom(z => Math.min(8, z * 1.3)) }
+    setTimeout(() => setSmoothTransition(false), 250)
+  }, [zoom, zoomTo])
+
+  const zoomOut = useCallback(() => {
+    setSmoothTransition(true)
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      zoomTo(zoom / 1.3, rect.left + rect.width / 2, rect.top + rect.height / 2)
+    } else { setZoom(z => Math.max(0.3, z / 1.3)) }
+    setTimeout(() => setSmoothTransition(false), 250)
+  }, [zoom, zoomTo])
+
+  const fitAll = useCallback(() => {
+    setSmoothTransition(true)
+    setZoom(1); setPan({ x: 0, y: 0 })
+    setTimeout(() => setSmoothTransition(false), 350)
   }, [])
 
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault()
+    setSmoothTransition(false)
+    const factor = e.deltaY < 0 ? 1.1 : 0.9
+    zoomTo(zoom * factor, e.clientX, e.clientY)
+  }, [zoom, zoomTo])
+
   // ─── Touch: pinch-to-zoom + pan ─────────────────────────────
-  const getTouchDist = (touches: React.TouchList) => {
-    if (touches.length < 2) return 0
-    const dx = touches[0].clientX - touches[1].clientX
-    const dy = touches[0].clientY - touches[1].clientY
+  const getTouchDist = (t: React.TouchList) => {
+    if (t.length < 2) return 0
+    const dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY
     return Math.sqrt(dx * dx + dy * dy)
   }
-  const getTouchCenter = (touches: React.TouchList) => ({
-    x: (touches[0].clientX + touches[1].clientX) / 2,
-    y: (touches[0].clientY + touches[1].clientY) / 2,
+  const getTouchCenter = (t: React.TouchList) => ({
+    x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2,
   })
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (editMode && draggingId !== null) return
     if (e.touches.length === 2) {
       lastTouchDist.current = getTouchDist(e.touches)
       lastTouchCenter.current = getTouchCenter(e.touches)
     } else if (e.touches.length === 1) {
-      // ─── Double-tap detection ──────────────────────────────
-      const now = Date.now()
-      const tx = e.touches[0].clientX
-      const ty = e.touches[0].clientY
-      const timeDelta = now - lastTapTime.current
-      const dist = Math.sqrt(
-        (tx - lastTapPos.current.x) ** 2 + (ty - lastTapPos.current.y) ** 2
-      )
-      if (timeDelta < 300 && dist < 30) {
-        // Double-tap: toggle between 1x and 2.5x centered on tap point
-        setZoom(prevZoom => {
-          const container = containerRef.current
-          if (!container) return prevZoom === 1 ? 2.5 : 1
-          const rect = container.getBoundingClientRect()
-          const tapX = tx - rect.left
-          const tapY = ty - rect.top
-
-          if (prevZoom > 1.2) {
-            // Reset to 1x
-            setPan({ x: 0, y: 0 })
-            return 1
-          } else {
-            // Zoom to 2.5x centered on tap
-            const newZoom = 2.5
-            // Calculate pan so tap point stays under finger
-            const scale = newZoom / prevZoom
-            const newPanX = tapX - (tapX - pan.x) * scale
-            const newPanY = tapY - (tapY - pan.y) * scale
-            setPan({ x: newPanX, y: newPanY })
-            return newZoom
-          }
-        })
-        lastTapTime.current = 0
-        lastTapPos.current = { x: 0, y: 0 }
-        return
-      }
-      lastTapTime.current = now
-      lastTapPos.current = { x: tx, y: ty }
-
-      isDragging.current = true
-      dragStart.current = {
-        x: e.touches[0].clientX, y: e.touches[0].clientY,
-        px: pan.x, py: pan.y
-      }
+      isPanning.current = true
+      dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, px: pan.x, py: pan.y }
     }
-  }, [pan])
+  }, [pan, editMode, draggingId])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     e.preventDefault()
+    if (editMode && draggingId !== null) return
     if (e.touches.length === 2) {
-      // Pinch zoom
-      const dist = getTouchDist(e.touches)
-      const center = getTouchCenter(e.touches)
+      const dist = getTouchDist(e.touches), center = getTouchCenter(e.touches)
       if (lastTouchDist.current > 0) {
-        const scale = dist / lastTouchDist.current
-        const newZoom = Math.max(0.3, Math.min(8, zoom * scale))
-        // Pan towards pinch center
-        const dx = center.x - lastTouchCenter.current.x
-        const dy = center.y - lastTouchCenter.current.y
-        setZoom(newZoom)
-        setPan(p => ({ x: p.x + dx, y: p.y + dy }))
+        const newZ = Math.max(0.3, Math.min(8, zoom * (dist / lastTouchDist.current)))
+        zoomTo(newZ, center.x, center.y)
       }
-      lastTouchDist.current = dist
-      lastTouchCenter.current = center
-    } else if (e.touches.length === 1 && isDragging.current) {
-      const dx = e.touches[0].clientX - dragStart.current.x
-      const dy = e.touches[0].clientY - dragStart.current.y
-      setPan({ x: dragStart.current.px + dx, y: dragStart.current.py + dy })
+      lastTouchDist.current = dist; lastTouchCenter.current = center
+    } else if (e.touches.length === 1 && isPanning.current) {
+      setPan({ x: dragStart.current.px + e.touches[0].clientX - dragStart.current.x, y: dragStart.current.py + e.touches[0].clientY - dragStart.current.y })
     }
-  }, [zoom])
+  }, [zoom, editMode, draggingId, zoomTo])
 
-  const handleTouchEnd = useCallback(() => {
-    isDragging.current = false
-    lastTouchDist.current = 0
-  }, [])
+  const handleTouchEnd = useCallback(() => { isPanning.current = false; lastTouchDist.current = 0 }, [])
 
-  // ─── Mouse pan (desktop) ────────────────────────────────────
+  // ─── Mouse pan ──────────────────────────────────────────────
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (editMode && draggingId !== null) return
     if ((e.target as Element).closest('[data-hotspot]')) return
-    isDragging.current = true
+    isPanning.current = true
     dragStart.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }
-  }, [pan])
+  }, [pan, editMode, draggingId])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging.current) return
-    const dx = e.clientX - dragStart.current.x
-    const dy = e.clientY - dragStart.current.y
-    setPan({ x: dragStart.current.px + dx, y: dragStart.current.py + dy })
+    if (editMode && draggingId !== null) {
+      const imgEl = containerRef.current?.querySelector('img')
+      if (!imgEl) return
+      const rect = imgEl.getBoundingClientRect()
+      const pctX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100))
+      const pctY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100))
+      setData(prev => ({
+        ...prev,
+        machines: prev.machines.map(m =>
+          m.id === draggingId
+            ? { ...m, pos_x: parseFloat(fromPctX(pctX).toFixed(1)), pos_y: parseFloat(fromPctY(pctY).toFixed(1)) }
+            : m
+        )
+      }))
+      return
+    }
+    if (!isPanning.current) return
+    setPan({ x: dragStart.current.px + e.clientX - dragStart.current.x, y: dragStart.current.py + e.clientY - dragStart.current.y })
+  }, [editMode, draggingId])
+
+  const handleMouseUp = useCallback(() => {
+    if (editMode && draggingId !== null) {
+      const m = data.machines.find(m => m.id === draggingId)
+      if (m?.pos_x && m?.pos_y) savePosition(draggingId, m.pos_x, m.pos_y)
+      setDraggingId(null)
+    }
+    isPanning.current = false
+  }, [editMode, draggingId, data.machines])
+
+  // ─── Double-click to add hotspot (edit mode) ────────────────
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (!editMode) return
+    if ((e.target as Element).closest('[data-hotspot]')) return
+    const imgEl = containerRef.current?.querySelector('img')
+    if (!imgEl) return
+    const rect = imgEl.getBoundingClientRect()
+    const pctX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100))
+    const pctY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100))
+    setCreatePos({ pctX, pctY })
+    setEditForm({
+      ...emptyForm(),
+      pos_x: fromPctX(pctX).toFixed(1),
+      pos_y: fromPctY(pctY).toFixed(1),
+    })
+    setShowCreateModal(true)
+  }, [editMode])
+
+  // ─── Hotspot drag start ─────────────────────────────────────
+  const handleHotspotMouseDown = useCallback((e: React.MouseEvent, m: SchemaMachine) => {
+    if (!editMode) return
+    e.stopPropagation(); e.preventDefault()
+    setDraggingId(m.id); setSelectedMachine(m)
+  }, [editMode])
+
+  const handleHotspotTouchStart = useCallback((e: React.TouchEvent, m: SchemaMachine) => {
+    if (!editMode || e.touches.length !== 1) return
+    e.stopPropagation(); setDraggingId(m.id); setSelectedMachine(m)
+  }, [editMode])
+
+  const handleHotspotTouchMove = useCallback((e: React.TouchEvent) => {
+    if (draggingId === null) return
+    e.preventDefault(); e.stopPropagation()
+    const imgEl = containerRef.current?.querySelector('img')
+    if (!imgEl || e.touches.length !== 1) return
+    const rect = imgEl.getBoundingClientRect()
+    const pctX = Math.max(0, Math.min(100, ((e.touches[0].clientX - rect.left) / rect.width) * 100))
+    const pctY = Math.max(0, Math.min(100, ((e.touches[0].clientY - rect.top) / rect.height) * 100))
+    setData(prev => ({
+      ...prev,
+      machines: prev.machines.map(m =>
+        m.id === draggingId ? { ...m, pos_x: parseFloat(fromPctX(pctX).toFixed(1)), pos_y: parseFloat(fromPctY(pctY).toFixed(1)) } : m
+      )
+    }))
+  }, [draggingId])
+
+  const handleHotspotTouchEnd = useCallback(() => {
+    if (draggingId !== null) {
+      const m = data.machines.find(m => m.id === draggingId)
+      if (m?.pos_x && m?.pos_y) savePosition(draggingId, m.pos_x, m.pos_y)
+      setDraggingId(null)
+    }
+  }, [draggingId, data.machines])
+
+  // ─── Save position ──────────────────────────────────────────
+  const savePosition = useCallback(async (id: number, px: number, py: number) => {
+    try { await api.put(`/machines/${id}`, { pos_x: px, pos_y: py }); toast.success('Position mise à jour', { duration: 2000, icon: '📍' }) }
+    catch { toast.error('Erreur sauvegarde position') }
   }, [])
 
-  const handleMouseUp = useCallback(() => { isDragging.current = false }, [])
+  // ─── Open edit modal ────────────────────────────────────────
+  const openEditModal = useCallback((m: SchemaMachine) => {
+    setEditingMachine(m)
+    setEditForm({
+      nom: m.nom || '', code_interne: m.code_interne || '', zone: m.zone || '',
+      etage: String(m.etage ?? 0), ligne: m.ligne || '', type: m.type || 'equipement',
+      statut: m.statut || 'operationnel', notes: '',
+      pos_x: m.pos_x ? String(m.pos_x) : '', pos_y: m.pos_y ? String(m.pos_y) : '',
+      couleur: m.couleur || '', taille_pastille: m.taille_pastille ? String(m.taille_pastille) : '',
+    })
+    setShowEditModal(true)
+  }, [])
+
+  // ─── Save edit form ─────────────────────────────────────────
+  const handleSaveEdit = useCallback(async () => {
+    if (!editingMachine) return
+    setSaving(true)
+    try {
+      const payload: Record<string, unknown> = {
+        nom: editForm.nom, code_interne: editForm.code_interne || null,
+        zone: editForm.zone || null, etage: parseInt(editForm.etage) || 0,
+        ligne: editForm.ligne || null, type: editForm.type, statut: editForm.statut,
+        pos_x: editForm.pos_x ? parseFloat(editForm.pos_x) : null,
+        pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
+        couleur: editForm.couleur || null,
+        taille_pastille: editForm.taille_pastille ? parseInt(editForm.taille_pastille) : null,
+      }
+      if (editForm.notes.trim()) payload.notes = editForm.notes
+      await api.put(`/machines/${editingMachine.id}`, payload)
+      toast.success(`${editForm.code_interne || editForm.nom} mis à jour`, { duration: 3000 })
+      setShowEditModal(false); setEditingMachine(null); fetchData()
+    } catch { toast.error('Erreur lors de la sauvegarde') }
+    finally { setSaving(false) }
+  }, [editingMachine, editForm, fetchData])
+
+  // ─── Create new machine ─────────────────────────────────────
+  const handleCreateMachine = useCallback(async () => {
+    if (!editForm.nom.trim()) return
+    // Proactive check: code_interne must be unique
+    if (editForm.code_interne.trim()) {
+      const code = editForm.code_interne.trim().toUpperCase()
+      const exists = data.machines.some(
+        m => (m.code_interne || '').toUpperCase() === code
+      )
+      if (exists) {
+        toast.error(`Code interne "${code}" déjà utilisé par un autre équipement`, { duration: 4000 })
+        return
+      }
+    }
+    setSaving(true)
+    try {
+      const payload: Record<string, unknown> = {
+        nom: editForm.nom, code_interne: editForm.code_interne || null,
+        zone: editForm.zone || null, etage: parseInt(editForm.etage) || 0,
+        ligne: editForm.ligne || null, type: editForm.type, statut: editForm.statut,
+        pos_x: editForm.pos_x ? parseFloat(editForm.pos_x) : null,
+        pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
+        couleur: editForm.couleur || null,
+        taille_pastille: editForm.taille_pastille ? parseInt(editForm.taille_pastille) : null,
+      }
+      await api.post('/machines/', payload)
+      toast.success(`${editForm.nom} créé`, { duration: 3000 })
+      setShowCreateModal(false); fetchData()
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || ''
+      if (msg.includes('unique') || msg.includes('duplicate') || msg.includes('code_interne'))
+        toast.error(`Code interne "${editForm.code_interne}" déjà utilisé`, { duration: 4000 })
+      else
+        toast.error(msg || 'Erreur lors de la création')
+    }
+    finally { setSaving(false) }
+  }, [editForm, fetchData])
+
+  // ─── Delete machine ─────────────────────────────────────────
+  const handleDeleteMachine = useCallback(async (id: number, nom: string) => {
+    setDeletingId(id)
+    try {
+      await api.delete(`/machines/${id}`)
+      toast.success(`${nom} supprimé`, { duration: 3000 })
+      setSelectedMachine(null); setShowEditModal(false)
+      setSelectedIds(prev => { const s = new Set(prev); s.delete(id); return s })
+      fetchData()
+    } catch { toast.error('Erreur lors de la suppression') }
+    finally { setDeletingId(null) }
+  }, [fetchData])
+
+  // ─── Multi-select toggle ────────────────────────────────────
+  const toggleSelectId = useCallback((id: number) => {
+    setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s })
+  }, [])
+
+  // ─── Batch delete selected ───────────────────────────────────
+  const handleBatchDelete = useCallback(async () => {
+    if (selectedIds.size === 0) return
+    const count = selectedIds.size
+    if (!confirm(`Supprimer ${count} équipement${count > 1 ? 's' : ''} ?`)) return
+    setDeletingBatch(true)
+    let ok = 0, fail = 0
+    for (const id of selectedIds) {
+      try { await api.delete(`/machines/${id}`); ok++ } catch { fail++ }
+    }
+    setDeletingBatch(false)
+    setSelectedIds(new Set()); setSelectedMachine(null); fetchData()
+    toast.success(`${ok} supprimé${ok > 1 ? 's' : ''}${fail ? `, ${fail} erreur${fail > 1 ? 's' : ''}` : ''}`, { duration: 3000 })
+  }, [selectedIds, fetchData])
+
+  // ─── Toggle edit mode (resets multi-select) ─────────────────
+  const toggleEditMode = useCallback(() => {
+    const next = !editMode
+    setEditMode(next)
+    if (!next) { setMultiSelectMode(false); setSelectedIds(new Set()); setDraggingId(null) }
+  }, [editMode])
 
   // ─── Toggle helpers ─────────────────────────────────────────
-  const toggleZone = useCallback((z: string) => {
-    setHiddenZones(prev => { const s = new Set(prev); s.has(z) ? s.delete(z) : s.add(z); return s })
-  }, [])
-  const toggleType = useCallback((t: string) => {
-    setHiddenTypes(prev => { const s = new Set(prev); s.has(t) ? s.delete(t) : s.add(t); return s })
-  }, [])
-  const resetView = useCallback(() => {
-    setZoom(1); setPan({ x: 0, y: 0 }); setHiddenZones(new Set()); setHiddenTypes(new Set())
-    setSearchQuery(''); setSelectedEtage(null)
-  }, [])
-
-  // ─── Navigate to machine ────────────────────────────────────
+  const toggleZone = useCallback((z: string) => setHiddenZones(p => { const s = new Set(p); s.has(z) ? s.delete(z) : s.add(z); return s }), [])
+  const toggleType = useCallback((t: string) => setHiddenTypes(p => { const s = new Set(p); s.has(t) ? s.delete(t) : s.add(t); return s }), [])
+  const resetView = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }); setHiddenZones(new Set()); setHiddenTypes(new Set()); setSearchQuery(''); setSelectedEtage(null) }, [])
   const goToMachine = useCallback((m: SchemaMachine) => navigate(`/machines/${m.id}`), [navigate])
 
-  // ─── Counts for filters ─────────────────────────────────────
-  const zoneCounts = useMemo(() => {
-    const c: Record<string, number> = {}
-    data.machines.forEach(m => { const z = m.zone || 'Autre'; c[z] = (c[z] || 0) + 1 })
-    return c
-  }, [data.machines])
-  const typeCounts = useMemo(() => {
-    const c: Record<string, number> = {}
-    data.machines.forEach(m => { c[m.type] = (c[m.type] || 0) + 1 })
-    return c
-  }, [data.machines])
+  // Counts
+  const zoneCounts = useMemo(() => { const c: Record<string, number> = {}; data.machines.forEach(m => { const z = m.zone || 'Autre'; c[z] = (c[z] || 0) + 1 }); return c }, [data.machines])
+  const typeCounts = useMemo(() => { const c: Record<string, number> = {}; data.machines.forEach(m => { c[m.type] = (c[m.type] || 0) + 1 }); return c }, [data.machines])
 
-  // ─── Search highlight ───────────────────────────────────────
   const searchMatch = useMemo(() => {
     if (!searchQuery) return null
     const q = searchQuery.toLowerCase()
-    return data.machines.find(m =>
-      (m.code_interne || '').toLowerCase() === q || (m.nom || '').toLowerCase() === q
-    ) || null
+    return data.machines.find(m => (m.code_interne || '').toLowerCase() === q || (m.nom || '').toLowerCase() === q) || null
   }, [searchQuery, data.machines])
 
-  // ─── Image style ────────────────────────────────────────────
-  const imageStyle = useMemo(() => {
-    if (isMobile && imgLoaded && imgDisplaySize.w > 0) {
-      return { width: imgDisplaySize.w, height: imgDisplaySize.h }
-    }
-    // Desktop: fill viewport width
-    if (imgLoaded) {
-      return { width: '100vw', height: 'auto' }
-    }
-    return {}
-  }, [isMobile, imgLoaded, imgDisplaySize])
+  // Helper: resolve a machine's display color
+  const getColor = (m: SchemaMachine) => m.couleur || STATUT_DOT[m.statut] || '#6b7280'
+  // Helper: resolve a machine's display size
+  const getSize = (m: SchemaMachine) => m.taille_pastille || (isMobile ? MOBILE_HOTSPOT_PX : HOTSPOT_PX)
 
   // ─── Loading ────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4" />
-          <p className="text-lg">Chargement du schéma de process...</p>
-        </div>
+  if (loading) return (
+    <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4" />
+        <p className="text-lg">Chargement du schéma de process...</p>
       </div>
-    )
-  }
+    </div>
+  )
 
   // ═══════════════════════════════════════════════════════════
   //  RENDER
   // ═══════════════════════════════════════════════════════════
   return (
-    <div className={`
-      ${isMobile
-        ? 'h-full flex flex-col'
-        : 'h-dvh flex flex-col'
-      }
-      bg-gray-900 overflow-hidden
-    `}>
+    <div className="h-dvh flex flex-col bg-gray-900 overflow-hidden">
 
       {/* ─── Top Bar ──────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0 z-30">
         <div className="flex items-center gap-2 min-w-0">
-          <button onClick={() => navigate('/')}
-                  className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 shrink-0">
+          <button onClick={() => navigate('/dashboard')} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300 shrink-0">
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-white font-semibold text-base truncate">
             {isMobile ? 'Schéma Process' : 'Schéma de Process — Trisélec'}
           </h1>
-          <span className="text-gray-500 text-xs shrink-0 hidden sm:inline">
-            {filteredMachines.length}/{data.machines.length}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1 shrink-0">
-          <button onClick={() => setShowSearch(!showSearch)}
-                  className={`p-1.5 rounded-lg hover:bg-gray-700 ${showSearch ? 'text-blue-400' : 'text-gray-300'}`}>
-            <Search size={18} />
-          </button>
-          <button onClick={() => setShowFilters(!showFilters)}
-                  className={`p-1.5 rounded-lg hover:bg-gray-700 ${showFilters ? 'text-blue-400' : 'text-gray-300'}`}>
-            <Filter size={18} />
-          </button>
-          <button onClick={() => setHeatmapMode(!heatmapMode)}
-                  className={`p-1.5 rounded-lg hover:bg-gray-700 ${heatmapMode ? 'text-red-400' : 'text-gray-300'}`}
-                  title="Heatmap pannes">
-            <Thermometer size={18} />
-          </button>
-          {/* Desktop zoom controls */}
-          {!isMobile && (
-            <>
-              <button onClick={zoomOut} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300">
-                <ZoomOut size={18} />
-              </button>
-              <span className="text-gray-500 text-[10px] w-10 text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button onClick={zoomIn} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300">
-                <ZoomIn size={18} />
-              </button>
-              <button onClick={fitAll} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300">
-                <Maximize2 size={18} />
-              </button>
-            </>
+          <span className="text-gray-500 text-xs shrink-0 hidden sm:inline">{filteredMachines.length}/{data.machines.length}</span>
+          {editMode && (
+            <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wider bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/30">
+              Mode Édition
+            </span>
           )}
         </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {isManager && (
+            <button onClick={toggleEditMode}
+              className={`p-1.5 rounded-lg hover:bg-gray-700 transition-colors ${editMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-300'}`}
+              title={editMode ? 'Quitter le mode édition' : 'Mode édition'}>
+              {editMode ? <Save size={18} /> : <Pencil size={18} />}
+            </button>
+          )}
+          {editMode && (
+            <button onClick={() => { setMultiSelectMode(!multiSelectMode); if (multiSelectMode) setSelectedIds(new Set()) }}
+              className={`p-1.5 rounded-lg hover:bg-gray-700 transition-colors ${multiSelectMode ? 'text-blue-400 bg-blue-400/10' : 'text-gray-300'}`}
+              title={multiSelectMode ? 'Quitter la sélection multiple' : 'Sélection multiple'}>
+              {multiSelectMode ? <CheckSquare size={18} /> : <Square size={18} />}
+            </button>
+          )}
+          <button onClick={() => setShowSearch(!showSearch)} className={`p-1.5 rounded-lg hover:bg-gray-700 ${showSearch ? 'text-blue-400' : 'text-gray-300'}`}>
+            <Search size={18} />
+          </button>
+          <button onClick={() => setShowFilters(!showFilters)} className={`p-1.5 rounded-lg hover:bg-gray-700 ${showFilters ? 'text-blue-400' : 'text-gray-300'}`}>
+            <Filter size={18} />
+          </button>
+          <button onClick={() => setHeatmapMode(!heatmapMode)} className={`p-1.5 rounded-lg hover:bg-gray-700 ${heatmapMode ? 'text-red-400' : 'text-gray-300'}`} title="Heatmap pannes">
+            <Thermometer size={18} />
+          </button>
+          <button onClick={zoomOut} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300"><ZoomOut size={18} /></button>
+          <span className="text-gray-500 text-[10px] w-10 text-center hidden sm:inline">{Math.round(zoom * 100)}%</span>
+          <button onClick={zoomIn} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300"><ZoomIn size={18} /></button>
+          <button onClick={fitAll} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300"><Maximize2 size={18} /></button>
+        </div>
       </div>
+
+      {/* ─── Edit mode hint bar ──────────────────────────────── */}
+      {editMode && (
+        <div className="px-3 py-1.5 bg-amber-900/30 border-b border-amber-700/30 shrink-0 z-20 flex items-center gap-2 text-amber-300 text-xs">
+          <Plus size={14} className="shrink-0" />
+          <span className="hidden sm:inline">{multiSelectMode ? 'Cliquez sur les pastilles à supprimer. Barre d\'action en bas.' : 'Double-cliquez pour ajouter. Glissez pour déplacer. Cliquez pour modifier.'}</span>
+          <span className="sm:hidden">{multiSelectMode ? 'Cliquez pour sélectionner.' : 'Double-clic: ajouter. Glisser: déplacer.'}</span>
+        </div>
+      )}
 
       {/* ─── Search bar ───────────────────────────────────────── */}
       {showSearch && (
         <div className="px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0 z-20">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text" value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+            <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               placeholder="Rechercher (code, nom)..."
-              className="w-full pl-10 pr-8 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
-              autoFocus
-            />
+              className="w-full pl-10 pr-8 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500" autoFocus />
             {searchQuery && (
-              <button onClick={() => setSearchQuery('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
-                <X size={16} />
-              </button>
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"><X size={16} /></button>
             )}
           </div>
         </div>
       )}
 
-      {/* ─── Filter panel (slide-down on mobile, sidebar on desktop) ── */}
+      {/* ─── Filter panel ─────────────────────────────────────── */}
       {showFilters && (
-        <div className={`${isMobile ? '' : 'absolute left-0 top-[52px] z-20'} bg-gray-800 border-b border-gray-700
-                          ${isMobile ? 'shrink-0' : 'w-60 rounded-br-lg shadow-xl'}`}>
+        <div className={`${isMobile ? '' : 'absolute left-0 top-[52px] z-20'} bg-gray-800 border-b border-gray-700 ${isMobile ? 'shrink-0' : 'w-60 rounded-br-lg shadow-xl'}`}>
           <div className="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
-            {/* Étage */}
             <div>
-              <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
-                <Layers size={12} /> Étage
-              </h3>
+              <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1"><Layers size={12} /> Étage</h3>
               <div className="flex flex-wrap gap-1">
-                <button onClick={() => setSelectedEtage(null)}
-                        className={`px-2.5 py-1 rounded-md text-xs ${selectedEtage === null ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}>
-                  Tous
-                </button>
-                {[0, 1, 2].map(e => (
-                  <button key={e} onClick={() => setSelectedEtage(e)}
-                          className={`px-2.5 py-1 rounded-md text-xs ${selectedEtage === e ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}>
-                    E{e}
-                  </button>
-                ))}
+                <button onClick={() => setSelectedEtage(null)} className={`px-2.5 py-1 rounded-md text-xs ${selectedEtage === null ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}>Tous</button>
+                {[0, 1, 2].map(e => (<button key={e} onClick={() => setSelectedEtage(e)} className={`px-2.5 py-1 rounded-md text-xs ${selectedEtage === e ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300'}`}>E{e}</button>))}
               </div>
             </div>
-
-            {/* Zones */}
             <div>
-              <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
-                <MapPin size={12} /> Zones
-              </h3>
+              <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1"><MapPin size={12} /> Zones</h3>
               <div className="flex flex-wrap gap-1">
                 {Object.entries(ZONE_DEFS).map(([key, def]) => (
                   <button key={key} onClick={() => toggleZone(key)}
-                          className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 border
-                            ${hiddenZones.has(key)
-                              ? 'border-gray-600 text-gray-500 line-through opacity-40'
-                              : 'text-gray-200'}`}
-                          style={hiddenZones.has(key) ? {} : { borderColor: def.border, background: def.color + '22' }}>
+                    className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 border ${hiddenZones.has(key) ? 'border-gray-600 text-gray-500 line-through opacity-40' : 'text-gray-200'}`}
+                    style={hiddenZones.has(key) ? {} : { borderColor: def.border, background: def.color + '22' }}>
                     <span className="w-2 h-2 rounded-sm" style={{ background: def.color }} />
                     {isMobile ? def.label.split(' ')[0] : def.label}
                     <span className="text-gray-500">({zoneCounts[key] || 0})</span>
@@ -598,19 +652,12 @@ export default function SchemaInteractif() {
                 ))}
               </div>
             </div>
-
-            {/* Types */}
             <div>
-              <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
-                <Layers size={12} /> Types
-              </h3>
+              <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1"><Layers size={12} /> Types</h3>
               <div className="flex flex-wrap gap-1">
                 {Object.entries(TYPE_CONFIG).map(([key, tc]) => (
                   <button key={key} onClick={() => toggleType(key)}
-                          className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 border
-                            ${hiddenTypes.has(key)
-                              ? 'border-gray-600 text-gray-500 line-through opacity-40'
-                              : 'text-gray-200 border-gray-600'}`}>
+                    className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 border ${hiddenTypes.has(key) ? 'border-gray-600 text-gray-500 line-through opacity-40' : 'text-gray-200 border-gray-600'}`}>
                     <span className="w-2 h-2 rounded-sm" style={{ background: tc.color }} />
                     {tc.label}
                     <span className="text-gray-500">({typeCounts[key] || 0})</span>
@@ -618,154 +665,111 @@ export default function SchemaInteractif() {
                 ))}
               </div>
             </div>
-
-            {/* Reset */}
-            <button onClick={resetView}
-                    className="w-full py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-xs">
-              Réinitialiser
-            </button>
+            <button onClick={resetView} className="w-full py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-xs">Réinitialiser</button>
           </div>
         </div>
       )}
 
-      {/* ─── Main canvas: image + hotspots ──────────────────────── */}
-      <div
-        ref={containerRef}
-        className="flex-1 relative overflow-hidden bg-gray-950 touch-none select-none"
-        onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+      {/* ─── Main canvas ──────────────────────────────────────── */}
+      <div ref={containerRef}
+        className={`flex-1 relative overflow-hidden bg-gray-950 touch-none select-none ${editMode ? 'cursor-crosshair' : ''}`}
+        onWheel={handleWheel} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
+        onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
       >
-        {/* Transform container: zoom + pan */}
-        <div
-          className="absolute origin-top-left"
+        <div className="absolute origin-top-left"
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             willChange: 'transform',
-          }}
-        >
-          {/* The process image */}
-          <img
-            src="/process2.jpg"
-            alt="Schéma de process Trisélec"
-            className="block max-w-none"
-            style={imageStyle}
-            onLoad={handleImgLoad}
-            draggable={false}
-          />
+            transition: smoothTransition ? 'transform 0.2s ease-out' : 'none',
+          }}>
+          <img src="/process2.jpg" alt="Schéma de process Trisélec" className="block max-w-none"
+            style={{ width: imgLoaded ? '100vw' : undefined, height: 'auto' }} onLoad={handleImgLoad} draggable={false} />
 
-          {/* Hotspots layer (same size as image, positioned on top) */}
           {imgLoaded && (
-            <div
-              className="absolute inset-0"
-              style={{ pointerEvents: 'none' }}
-            >
-              {/* ─── Heatmap zone overlays ────────────────────────── */}
+            <div className="absolute inset-0" style={{ pointerEvents: 'none' }}>
+              {/* Heatmap overlays */}
               {heatmapMode && heatmapData && Object.entries(heatmapData.zones).map(([zoneKey, zoneData]) => {
-                const bounds = ZONE_BOUNDS[zoneKey]
-                if (!bounds) return null
+                const bounds = ZONE_BOUNDS[zoneKey]; if (!bounds) return null
                 const count = zoneData.open_pannes + zoneData.recent_pannes
                 return (
-                  <div
-                    key={zoneKey}
-                    className="absolute flex items-center justify-center"
-                    style={{
-                      left: `${bounds.x1}%`,
-                      top: `${bounds.y1}%`,
-                      width: `${bounds.x2 - bounds.x1}%`,
-                      height: `${bounds.y2 - bounds.y1}%`,
-                      background: getHeatmapColor(count),
-                      borderRadius: 12,
-                      border: '1px solid rgba(255,255,255,0.08)',
-                    }}
-                  >
-                    <span
-                      className="font-bold text-lg drop-shadow-lg"
-                      style={{ color: getHeatmapTextColor(count), textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}
-                    >
-                      {count}
-                    </span>
+                  <div key={zoneKey} className="absolute flex items-center justify-center"
+                    style={{ left: `${bounds.x1}%`, top: `${bounds.y1}%`, width: `${bounds.x2 - bounds.x1}%`, height: `${bounds.y2 - bounds.y1}%`, background: getHeatmapColor(count), borderRadius: 12, border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <span className="font-bold text-lg drop-shadow-lg" style={{ color: getHeatmapTextColor(count), textShadow: '0 2px 8px rgba(0,0,0,0.7)' }}>{count}</span>
                   </div>
                 )
               })}
 
+              {/* Machine hotspots */}
               {data.machines.map(m => {
-                if (!m.pos_x || !m.pos_y) return null
-                if (!visibleIds.has(m.id)) return null
-
-                const left = toPctX(m.pos_x)
-                const top = toPctY(m.pos_y)
-                const isHovered = hoveredId === m.id
-                const isSearch = searchMatch?.id === m.id
-                const tc = TYPE_CONFIG[m.type]
-                const sc = STATUT_DOT[m.statut] || '#6b7280'
-                const size = isHovered || isSearch ? HOTSPOT_PX + 8 : HOTSPOT_PX
+                if (!m.pos_x || !m.pos_y || !visibleIds.has(m.id)) return null
+                const left = toPctX(m.pos_x), top = toPctY(m.pos_y)
+                const isHovered = hoveredId === m.id, isSearch = searchMatch?.id === m.id, isDrag = draggingId === m.id
+                const tc = TYPE_CONFIG[m.type], sc = getColor(m)
+                const baseSize = getSize(m)
+                const isSelected = selectedIds.has(m.id)
+                const size = isHovered || isSearch || isDrag ? baseSize + 8 : baseSize
 
                 return (
-                  <div
-                    key={m.id}
-                    data-hotspot="true"
-                    className="absolute group"
-                    style={{
-                      left: `${left}%`,
-                      top: `${top}%`,
-                      transform: 'translate(-50%, -50%)',
-                      pointerEvents: 'auto',
-                      cursor: 'pointer',
+                  <div key={m.id} data-hotspot="true" className="absolute group"
+                    style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%, -50%)', pointerEvents: 'auto',
+                      cursor: multiSelectMode ? 'pointer' : editMode ? 'grab' : 'pointer', zIndex: isDrag ? 100 : isSelected ? 50 : 10 }}
+                    onMouseDown={(e) => {
+                      if (multiSelectMode) { e.stopPropagation(); toggleSelectId(m.id); return }
+                      if (editMode) { handleHotspotMouseDown(e, m); return }
+                      e.stopPropagation(); setSelectedMachine(m)
                     }}
-                    onClick={(e) => { e.stopPropagation(); setSelectedMachine(m) }}
-                    onMouseEnter={() => setHoveredId(m.id)}
-                    onMouseLeave={() => setHoveredId(null)}
+                    onMouseEnter={() => setHoveredId(m.id)} onMouseLeave={() => setHoveredId(null)}
+                    onClick={(e) => {
+                      if (multiSelectMode) { e.stopPropagation(); toggleSelectId(m.id); return }
+                      if (!editMode) { e.stopPropagation(); setSelectedMachine(m) }
+                    }}
+                    onTouchStart={(e) => handleHotspotTouchStart(e, m)}
+                    onTouchMove={(e) => handleHotspotTouchMove(e)}
+                    onTouchEnd={handleHotspotTouchEnd}
                   >
-                    {/* Pulse ring for search match */}
-                    {isSearch && (
-                      <div className="absolute inset-0 rounded-full animate-ping bg-yellow-400 opacity-40"
-                           style={{ width: size + 12, height: size + 12, margin: -(size + 12 - size) / 2 }} />
+                    {isSearch && (<div className="absolute inset-0 rounded-full animate-ping bg-yellow-400 opacity-40" style={{ width: size + 12, height: size + 12, margin: -(size + 12 - size) / 2 }} />)}
+                    {heatmapMode && heatmapMachineMap.get(m.id)?.panne_count && (<div className="absolute inset-0 rounded-full animate-ping bg-red-500 opacity-60" style={{ width: size + 14, height: size + 14, margin: -(size + 14 - size) / 2 }} />)}
+                    {editMode && !isDrag && !isSelected && (<div className="absolute inset-0 rounded-full border-2 border-amber-400/50 animate-pulse" style={{ width: size + 6, height: size + 6, margin: -(size + 6 - size) / 2 }} />)}
+                    {isSelected && (
+                      <div className="absolute inset-0 rounded-full border-3 border-blue-400 bg-blue-400/20"
+                        style={{ width: size + 8, height: size + 8, margin: -(size + 8 - size) / 2, boxShadow: '0 0 12px rgba(96,165,250,0.5)' }}>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                          </div>
+                        </div>
+                      </div>
                     )}
+                    {isDrag && (<div className="absolute inset-0 rounded-full border-2 border-amber-400" style={{ width: size + 10, height: size + 10, margin: -(size + 10 - size) / 2, boxShadow: '0 0 20px rgba(251,191,36,0.5)' }} />)}
 
-                    {/* Pulsing red ring in heatmap mode for machines with open pannes */}
-                    {heatmapMode && heatmapMachineMap.get(m.id)?.panne_count ? (
-                      <div className="absolute rounded-full animate-ping bg-red-500 opacity-60"
-                           style={{ width: 20, height: 20, left: '50%', top: '50%', marginLeft: -10, marginTop: -10 }} />
-                    ) : null}
-
-                    {/* Hotspot pill with machine name */}
-                    <div
-                      className="rounded-full border-2 flex items-center justify-center transition-all duration-150 whitespace-nowrap"
+                    <div className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
                       style={{
-                        padding: isHovered || isSearch ? '2px 8px' : '1px 6px',
-                        minWidth: 28,
-                        height: isHovered || isSearch ? 28 : 24,
-                        borderColor: isHovered ? '#60a5fa' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef4444' : sc,
-                        background: (isHovered || isSearch) ? (tc?.color || '#60a5fa') + 'cc' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef444488' : sc + '88',
-                        boxShadow: (isHovered || isSearch) ? `0 0 12px ${tc?.color || '#60a5fa'}66` :
-                                   (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '0 0 10px rgba(239,68,68,0.5)' : 'none',
-                      }}
-                    >
-                      {/* Machine name label */}
-                      <span className="text-white font-bold leading-none"
-                            style={{ fontSize: isHovered ? 10 : 8, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                        width: size, height: size,
+                        borderColor: isDrag ? '#fbbf24' : isHovered ? '#60a5fa' : sc,
+                        background: isDrag ? '#fbbf24cc' : (isHovered || isSearch) ? (tc?.color || '#60a5fa') + 'cc' : sc + '88',
+                        boxShadow: isDrag ? '0 0 16px rgba(251,191,36,0.6)' :
+                          (isHovered || isSearch) ? `0 0 12px ${(tc?.color || '#60a5fa')}66` :
+                          editMode ? '0 0 6px rgba(251,191,36,0.3)' : 'none',
+                      }}>
+                      <span className="text-white font-bold leading-none" style={{ fontSize: (isHovered || isDrag ? 10 : 7) * (baseSize / HOTSPOT_PX), textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
                         {truncateName(m.code_interne || m.nom)}
                       </span>
                     </div>
 
-                    {/* Desktop tooltip on hover */}
-                    {!isMobile && isHovered && (
+                    {!isMobile && isHovered && !editMode && (
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-900/95 border border-gray-600 rounded-lg px-3 py-2 whitespace-nowrap z-50 shadow-xl pointer-events-none">
                         <div className="text-white font-bold text-sm">{m.code_interne || m.nom}</div>
-                        <div className="text-gray-400 text-xs">
-                          {tc?.label || m.type} · {m.zone}
-                        </div>
-                        <div className="text-xs mt-0.5" style={{ color: sc }}>
-                          {m.statut}
-                        </div>
-                        {/* Arrow */}
+                        <div className="text-gray-400 text-xs">{tc?.label || m.type} · {m.zone}</div>
+                        <div className="text-xs mt-0.5" style={{ color: sc }}>{m.statut}</div>
                         <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900/95" />
+                      </div>
+                    )}
+                    {!isMobile && isHovered && editMode && !isDrag && (
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-amber-900/95 border border-amber-600 rounded-lg px-3 py-2 whitespace-nowrap z-50 shadow-xl pointer-events-none">
+                        <div className="text-amber-100 font-bold text-sm">{m.code_interne || m.nom}</div>
+                        <div className="text-amber-300/70 text-xs">Glisser · Clic: modifier · Supprimer</div>
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-amber-900/95" />
                       </div>
                     )}
                   </div>
@@ -774,155 +778,315 @@ export default function SchemaInteractif() {
             </div>
           )}
         </div>
-
-        {/* Zoom indicator (bottom-left) */}
-        <div className="absolute bottom-3 left-3 bg-gray-800/80 rounded-lg px-2 py-1 text-gray-400 text-xs backdrop-blur-sm">
-          {Math.round(zoom * 100)}%
-        </div>
+        <div className="absolute bottom-3 left-3 bg-gray-800/80 rounded-lg px-2 py-1 text-gray-400 text-xs backdrop-blur-sm">{Math.round(zoom * 100)}%</div>
       </div>
 
-      {/* ─── Mobile floating toolbar (above bottom nav) ────────── */}
-      {isMobile && (
-        <div className="shrink-0 flex items-center justify-center gap-3 px-4 py-2 bg-gray-800/95 backdrop-blur-sm border-t border-gray-700">
-          <button
-            onClick={zoomOut}
-            className="w-10 h-10 rounded-full bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-gray-200 flex items-center justify-center transition-colors"
-            aria-label="Zoom arrière"
-          >
-            <ZoomOut size={18} />
-          </button>
-          <span className="text-gray-400 text-xs font-mono w-12 text-center">
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            onClick={zoomIn}
-            className="w-10 h-10 rounded-full bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-gray-200 flex items-center justify-center transition-colors"
-            aria-label="Zoom avant"
-          >
-            <ZoomIn size={18} />
-          </button>
-          <button
-            onClick={fitAll}
-            className="w-10 h-10 rounded-full bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-gray-200 flex items-center justify-center transition-colors"
-            aria-label="Ajuster"
-          >
-            <Maximize2 size={16} />
-          </button>
+      {/* ═══════════════════════════════════════════════════════
+          EDIT / CREATE MODAL (shared form component)
+         ═══════════════════════════════════════════════════════ */}
+      {(showEditModal || showCreateModal) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setShowEditModal(false); setShowCreateModal(false) }} />
+          <div className="relative bg-gray-800 border border-gray-600 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="sticky top-0 bg-gray-800 rounded-t-2xl border-b border-gray-700 px-5 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-white font-bold text-lg">{showCreateModal ? 'Ajouter un équipement' : 'Modifier l\'équipement'}</h2>
+                {editingMachine && <p className="text-gray-400 text-xs mt-0.5">ID: {editingMachine.id}</p>}
+              </div>
+              <button onClick={() => { setShowEditModal(false); setShowCreateModal(false) }} className="text-gray-400 hover:text-white p-1"><X size={20} /></button>
+            </div>
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Nom *</label>
+                <input type="text" value={editForm.nom} onChange={e => setEditForm(f => ({ ...f, nom: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500" placeholder="Convoyeur d'entrée..." />
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Code interne</label>
+                {showCreateModal && editForm.code_interne.trim() && data.machines.some(m => (m.code_interne || '').toUpperCase() === editForm.code_interne.trim().toUpperCase()) && (
+                  <p className="text-red-400 text-[10px] mb-1 flex items-center gap-1">
+                    <AlertTriangle size={10} /> Ce code interne est déjà utilisé
+                  </p>
+                )}
+                <input type="text" value={editForm.code_interne} onChange={e => setEditForm(f => ({ ...f, code_interne: e.target.value }))}
+                  className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-white text-sm focus:outline-none uppercase ${showCreateModal && editForm.code_interne.trim() && data.machines.some(m => (m.code_interne || '').toUpperCase() === editForm.code_interne.trim().toUpperCase()) ? 'border-red-500 focus:border-red-500' : 'border-gray-600 focus:border-blue-500'}`} placeholder="L101" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Type</label>
+                  <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    {TYPE_OPTIONS.map(t => (<option key={t.value} value={t.value}>{t.label}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Statut</label>
+                  <select value={editForm.statut} onChange={e => setEditForm(f => ({ ...f, statut: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    {STATUT_OPTIONS.map(s => (<option key={s.value} value={s.value}>{s.label}</option>))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Zone</label>
+                  <select value={editForm.zone} onChange={e => setEditForm(f => ({ ...f, zone: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="">— Aucune —</option>
+                    {ZONE_OPTIONS.map(z => (<option key={z.value} value={z.value}>{z.label}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-400 text-xs font-medium mb-1">Étage</label>
+                  <select value={editForm.etage} onChange={e => setEditForm(f => ({ ...f, etage: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    <option value="0">E0 (RDC)</option><option value="1">E1</option><option value="2">E2</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Ligne</label>
+                <input type="text" value={editForm.ligne} onChange={e => setEditForm(f => ({ ...f, ligne: e.target.value }))}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500" placeholder="Ligne 1" />
+              </div>
+              <div>
+                <label className="block text-gray-400 text-xs font-medium mb-1">Notes</label>
+                <textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} rows={2}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 resize-none" placeholder="Notes optionnelles..." />
+              </div>
+
+              {/* ─── Appearance: Color + Size ──────────────────── */}
+              <div className="bg-gray-700/30 rounded-lg p-3">
+                <label className="block text-gray-400 text-xs font-medium mb-3 flex items-center gap-1.5"><Palette size={12} /> Apparence de la pastille</label>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Color */}
+                  <div>
+                    <label className="block text-gray-500 text-[10px] mb-1.5">Couleur personnalisée</label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={editForm.couleur || '#22c55e'}
+                        onChange={e => setEditForm(f => ({ ...f, couleur: e.target.value }))}
+                        className="w-9 h-9 rounded-lg border border-gray-600 cursor-pointer bg-transparent shrink-0" />
+                      <div className="flex flex-wrap gap-1 max-w-[140px]">
+                        {PRESET_COLORS.map(c => (
+                          <button key={c} onClick={() => setEditForm(f => ({ ...f, couleur: f.couleur === c ? '' : c }))}
+                            className={`w-5 h-5 rounded-full border-2 transition-transform hover:scale-125 ${editForm.couleur === c ? 'border-white scale-110' : 'border-gray-600'}`}
+                            style={{ background: c }} />
+                        ))}
+                      </div>
+                    </div>
+                    {editForm.couleur && (
+                      <button onClick={() => setEditForm(f => ({ ...f, couleur: '' }))}
+                        className="text-gray-500 text-[10px] mt-1 hover:text-gray-300">Réinitialiser (couleur par défaut)</button>
+                    )}
+                  </div>
+                  {/* Size */}
+                  <div>
+                    <label className="block text-gray-500 text-[10px] mb-1.5">Taille (px): {editForm.taille_pastille || 'défaut (28)'}</label>
+                    <input type="range" min="12" max="60" step="2"
+                      value={editForm.taille_pastille || 28}
+                      onChange={e => setEditForm(f => ({ ...f, taille_pastille: e.target.value === '28' ? '' : e.target.value }))}
+                      className="w-full accent-amber-400" />
+                    <div className="flex justify-between text-[9px] text-gray-600">
+                      <span>12px</span><span>60px</span>
+                    </div>
+                    {/* Live preview */}
+                    <div className="flex items-center justify-center mt-2 h-16 bg-gray-800/50 rounded-lg">
+                      <div className="rounded-full border-2 flex items-center justify-center"
+                        style={{
+                          width: parseInt(editForm.taille_pastille || '28'),
+                          height: parseInt(editForm.taille_pastille || '28'),
+                          borderColor: editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280',
+                          background: (editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280') + '88',
+                        }}>
+                        <span className="text-white font-bold" style={{ fontSize: 9 * (parseInt(editForm.taille_pastille || '28') / 28), textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>?</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ─── Position ──────────────────────────────────── */}
+              <div className="bg-gray-700/30 rounded-lg p-3">
+                <label className="block text-gray-400 text-xs font-medium mb-2">Position sur le schéma</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-gray-500 text-[10px] mb-1">pos_x</label>
+                    <input type="number" step="0.1" value={editForm.pos_x} onChange={e => setEditForm(f => ({ ...f, pos_x: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500 font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-500 text-[10px] mb-1">pos_y</label>
+                    <input type="number" step="0.1" value={editForm.pos_y} onChange={e => setEditForm(f => ({ ...f, pos_y: e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500 font-mono" />
+                  </div>
+                </div>
+                {showCreateModal && <p className="text-gray-500 text-[10px] mt-1.5">Position définie par le double-clic. Ajustez si besoin.</p>}
+              </div>
+
+              {/* ─── Actions ───────────────────────────────────── */}
+              <div className="flex gap-3 pt-2">
+                {/* Delete button (edit only) */}
+                {showEditModal && editingMachine && (
+                  <button onClick={() => { if (confirm(`Supprimer "${editingMachine.nom}" ?`)) handleDeleteMachine(editingMachine.id, editingMachine.nom) }}
+                    disabled={deletingId === editingMachine.id}
+                    className="py-2.5 px-4 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl font-medium transition-colors text-sm flex items-center gap-2">
+                    {deletingId === editingMachine.id ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-400" /> : <Trash2 size={16} />}
+                  </button>
+                )}
+                <button onClick={() => { setShowEditModal(false); setShowCreateModal(false) }}
+                  className="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl font-medium transition-colors text-sm">Annuler</button>
+                <button onClick={showCreateModal ? handleCreateMachine : handleSaveEdit}
+                  disabled={saving || !editForm.nom.trim()}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded-xl font-bold transition-colors text-sm flex items-center justify-center gap-2">
+                  {saving ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Sauvegarde...</>)
+                    : showCreateModal ? (<><Plus size={16} /> Créer</>)
+                    : (<><Save size={16} /> Enregistrer</>)}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* ─── Mobile bottom sheet ──────────────────────────────── */}
-      {isMobile && selectedMachine && (
+      {/* ─── Mobile bottom sheet (view mode) ──────────────────── */}
+      {isMobile && selectedMachine && !editMode && (
         <div className="fixed inset-0 z-40" onClick={() => setSelectedMachine(null)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div
-            className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl max-h-[70vh] overflow-y-auto animate-slide-up"
-            onClick={e => e.stopPropagation()}
-          >
+          <div className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl max-h-[70vh] overflow-y-auto animate-slide-up" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 bg-gray-800 pt-3 pb-2 px-4 border-b border-gray-700">
               <div className="w-10 h-1 bg-gray-600 rounded-full mx-auto mb-3" />
               <div className="flex items-center justify-between">
-                <h2 className="text-white font-bold text-lg">
-                  {selectedMachine.code_interne || selectedMachine.nom}
-                </h2>
-                <button onClick={() => setSelectedMachine(null)} className="text-gray-400 p-1">
-                  <X size={20} />
-                </button>
+                <h2 className="text-white font-bold text-lg">{selectedMachine.code_interne || selectedMachine.nom}</h2>
+                <button onClick={() => setSelectedMachine(null)} className="text-gray-400 p-1"><X size={20} /></button>
               </div>
             </div>
             <div className="p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full"
-                      style={{ background: STATUT_DOT[selectedMachine.statut] || '#6b7280' }} />
-                <span className="text-sm capitalize" style={{ color: STATUT_DOT[selectedMachine.statut] || '#6b7280' }}>
-                  {selectedMachine.statut}
-                </span>
+                <span className="w-3 h-3 rounded-full" style={{ background: getColor(selectedMachine) }} />
+                <span className="text-sm capitalize" style={{ color: getColor(selectedMachine) }}>{selectedMachine.statut}</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="bg-gray-700/50 rounded-lg p-3">
-                  <div className="text-gray-500 text-xs">Type</div>
-                  <div className="text-white font-medium">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type}</div>
-                </div>
-                <div className="bg-gray-700/50 rounded-lg p-3">
-                  <div className="text-gray-500 text-xs">Zone</div>
-                  <div className="text-white font-medium">{selectedMachine.zone || '—'}</div>
-                </div>
-                <div className="bg-gray-700/50 rounded-lg p-3">
-                  <div className="text-gray-500 text-xs">Étage</div>
-                  <div className="text-white font-medium">Étage {selectedMachine.etage}</div>
-                </div>
-                <div className="bg-gray-700/50 rounded-lg p-3">
-                  <div className="text-gray-500 text-xs">Ligne</div>
-                  <div className="text-white font-medium text-xs">{selectedMachine.ligne || '—'}</div>
-                </div>
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">Type</div><div className="text-white font-medium">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type}</div></div>
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">Zone</div><div className="text-white font-medium">{selectedMachine.zone || '—'}</div></div>
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">Étage</div><div className="text-white font-medium">Étage {selectedMachine.etage}</div></div>
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">Ligne</div><div className="text-white font-medium text-xs">{selectedMachine.ligne || '—'}</div></div>
               </div>
-              <button onClick={() => goToMachine(selectedMachine)}
-                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-semibold transition-colors">
-                Voir la fiche complète
-              </button>
+              <button onClick={() => goToMachine(selectedMachine)} className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl font-semibold transition-colors">Voir la fiche complète</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─── Desktop detail panel ────────────────────────────── */}
-      {!isMobile && selectedMachine && (
+      {/* ─── Mobile bottom sheet (edit mode) ──────────────────── */}
+      {isMobile && selectedMachine && editMode && draggingId === null && (
+        <div className="fixed inset-0 z-40" onClick={() => setSelectedMachine(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl max-h-[70vh] overflow-y-auto animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-gray-800 pt-3 pb-2 px-4 border-b border-amber-700/30">
+              <div className="w-10 h-1 bg-amber-600 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <h2 className="text-amber-100 font-bold text-lg">{selectedMachine.code_interne || selectedMachine.nom}</h2>
+                <button onClick={() => setSelectedMachine(null)} className="text-gray-400 p-1"><X size={20} /></button>
+              </div>
+            </div>
+            <div className="p-4 space-y-3">
+              <div className="flex items-center gap-2 text-amber-300 text-xs"><GripVertical size={14} /><span>Glissez la pastille pour déplacer</span></div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">Type</div><div className="text-white font-medium">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type}</div></div>
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">Zone</div><div className="text-white font-medium">{selectedMachine.zone || '—'}</div></div>
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">pos_x</div><div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_x?.toFixed(1) || '—'}</div></div>
+                <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-gray-500 text-xs">pos_y</div><div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_y?.toFixed(1) || '—'}</div></div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => openEditModal(selectedMachine)} className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 text-sm"><Pencil size={16} /> Modifier</button>
+                <button onClick={() => { if (confirm(`Supprimer "${selectedMachine.nom}" ?`)) handleDeleteMachine(selectedMachine.id, selectedMachine.nom) }}
+                  disabled={deletingId === selectedMachine.id}
+                  className="py-3 px-4 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl font-semibold transition-colors"><Trash2 size={16} /></button>
+                <button onClick={() => goToMachine(selectedMachine)} className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold transition-colors text-sm">Fiche</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Desktop panel (view mode) ────────────────────────── */}
+      {!isMobile && selectedMachine && !editMode && (
         <div className="absolute right-0 top-[52px] bottom-0 w-80 bg-gray-800 border-l border-gray-700 z-20 overflow-y-auto shadow-2xl">
           <div className="p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">Détail Équipement</h3>
-              <button onClick={() => setSelectedMachine(null)} className="text-gray-400 hover:text-white">
-                <X size={18} />
-              </button>
-            </div>
+            <div className="flex items-center justify-between mb-4"><h3 className="text-white font-semibold">Détail Équipement</h3><button onClick={() => setSelectedMachine(null)} className="text-gray-400 hover:text-white"><X size={18} /></button></div>
             <div className="space-y-3">
-              <div className="bg-gray-700/50 rounded-lg p-3">
-                <div className="text-2xl font-bold text-white">{selectedMachine.code_interne || selectedMachine.nom}</div>
-                <div className="text-sm text-gray-400">{selectedMachine.modele || ''}</div>
-              </div>
+              <div className="bg-gray-700/50 rounded-lg p-3"><div className="text-2xl font-bold text-white">{selectedMachine.code_interne || selectedMachine.nom}</div><div className="text-sm text-gray-400">{selectedMachine.modele || ''}</div></div>
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="bg-gray-700/30 rounded-lg p-2">
-                  <div className="text-gray-500 text-xs">Type</div>
-                  <div className="text-white font-medium">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type}</div>
-                </div>
-                <div className="bg-gray-700/30 rounded-lg p-2">
-                  <div className="text-gray-500 text-xs">Zone</div>
-                  <div className="text-white font-medium">{selectedMachine.zone || '—'}</div>
-                </div>
-                <div className="bg-gray-700/30 rounded-lg p-2">
-                  <div className="text-gray-500 text-xs">Étage</div>
-                  <div className="text-white font-medium">Étage {selectedMachine.etage}</div>
-                </div>
-                <div className="bg-gray-700/30 rounded-lg p-2">
-                  <div className="text-gray-500 text-xs">Ligne</div>
-                  <div className="text-white font-medium text-xs">{selectedMachine.ligne || '—'}</div>
-                </div>
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">Type</div><div className="text-white font-medium">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type}</div></div>
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">Zone</div><div className="text-white font-medium">{selectedMachine.zone || '—'}</div></div>
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">Étage</div><div className="text-white font-medium">Étage {selectedMachine.etage}</div></div>
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">Ligne</div><div className="text-white font-medium text-xs">{selectedMachine.ligne || '—'}</div></div>
               </div>
-              <div className="bg-gray-700/30 rounded-lg p-3">
-                <div className="text-gray-500 text-xs mb-1">Statut</div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full"
-                        style={{ background: STATUT_DOT[selectedMachine.statut] || '#6b7280' }} />
-                  <span className="text-white font-medium capitalize">{selectedMachine.statut}</span>
-                </div>
-              </div>
-              <button onClick={() => goToMachine(selectedMachine)}
-                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors text-sm">
-                Voir la fiche complète
-              </button>
+              <div className="bg-gray-700/30 rounded-lg p-3"><div className="text-gray-500 text-xs mb-1">Statut</div><div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{ background: getColor(selectedMachine) }} /><span className="text-white font-medium capitalize">{selectedMachine.statut}</span></div></div>
+              <button onClick={() => goToMachine(selectedMachine)} className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors text-sm">Voir la fiche complète</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ─── Mobile legend bar (bottom) ──────────────────────── */}
+      {/* ─── Desktop panel (edit mode) ────────────────────────── */}
+      {!isMobile && selectedMachine && editMode && draggingId === null && (
+        <div className="absolute right-0 top-[52px] bottom-0 w-80 bg-gray-800 border-l border-amber-700/30 z-20 overflow-y-auto shadow-2xl">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-4"><h3 className="text-amber-100 font-semibold">Modifier l'équipement</h3><button onClick={() => setSelectedMachine(null)} className="text-gray-400 hover:text-white"><X size={18} /></button></div>
+            <div className="space-y-3">
+              <div className="bg-gray-700/50 rounded-lg p-3 border border-amber-700/20">
+                <div className="text-xl font-bold text-white">{selectedMachine.code_interne || selectedMachine.nom}</div>
+                <div className="text-sm text-gray-400 mt-0.5">{TYPE_CONFIG[selectedMachine.type]?.label || selectedMachine.type} · {selectedMachine.zone}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">Statut</div><div className="flex items-center gap-1.5 mt-1"><span className="w-2 h-2 rounded-full" style={{ background: getColor(selectedMachine) }} /><span className="text-white font-medium capitalize text-xs">{selectedMachine.statut}</span></div></div>
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">Étage</div><div className="text-white font-medium">E{selectedMachine.etage}</div></div>
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">pos_x</div><div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_x?.toFixed(1) || '—'}</div></div>
+                <div className="bg-gray-700/30 rounded-lg p-2"><div className="text-gray-500 text-xs">pos_y</div><div className="text-amber-300 font-mono text-xs">{selectedMachine.pos_y?.toFixed(1) || '—'}</div></div>
+              </div>
+              <div className="bg-amber-900/20 border border-amber-700/20 rounded-lg p-3 text-amber-200 text-xs space-y-1">
+                <p className="font-semibold">Mode édition actif</p>
+                <p>Glissez la pastille pour la repositionner. Position sauvegardée au relâchement.</p>
+              </div>
+              <button onClick={() => openEditModal(selectedMachine)} className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold transition-colors text-sm flex items-center justify-center gap-2"><Pencil size={16} /> Modifier les informations</button>
+              <button onClick={() => { if (confirm(`Supprimer "${selectedMachine.nom}" ?`)) handleDeleteMachine(selectedMachine.id, selectedMachine.nom) }}
+                disabled={deletingId === selectedMachine.id}
+                className="w-full py-2.5 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-lg font-medium transition-colors text-sm flex items-center justify-center gap-2">
+                {deletingId === selectedMachine.id ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-400" /> : <><Trash2 size={16} /> Supprimer cet équipement</>}
+              </button>
+              <button onClick={() => goToMachine(selectedMachine)} className="w-full py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg font-medium transition-colors text-sm">Voir la fiche complète</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Multi-select batch action bar ──────────────────── */}
+      {multiSelectMode && selectedIds.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-gray-800 border-t border-blue-500/30 px-4 py-3 flex items-center justify-between"
+          style={isMobile ? { marginBottom: 40 } : {}}>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm">{selectedIds.size}</div>
+            <span className="text-white font-medium text-sm">{selectedIds.size} sélectionné{selectedIds.size > 1 ? 's' : ''}</span>
+            <button onClick={() => setSelectedIds(new Set())} className="text-gray-400 hover:text-white text-xs underline">Tout déselectionner</button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={handleBatchDelete} disabled={deletingBatch}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 text-white rounded-lg font-medium text-sm flex items-center gap-2 transition-colors">
+              {deletingBatch ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> : <Trash2 size={16} />}
+              Supprimer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Mobile legend bar ────────────────────────────────── */}
       {isMobile && (
         <div className="flex items-center justify-center gap-3 px-2 py-1.5 bg-gray-800 border-t border-gray-700 shrink-0 overflow-x-auto">
           {Object.entries(TYPE_CONFIG).map(([key, tc]) => (
-            <div key={key} className="flex items-center gap-1 shrink-0">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ background: tc.color }} />
-              <span className="text-gray-400 text-[10px]">{tc.label}</span>
-            </div>
+            <div key={key} className="flex items-center gap-1 shrink-0"><span className="w-2.5 h-2.5 rounded-full" style={{ background: tc.color }} /><span className="text-gray-400 text-[10px]">{tc.label}</span></div>
           ))}
         </div>
       )}

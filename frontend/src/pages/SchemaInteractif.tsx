@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 import {
   ZoomIn, ZoomOut, Maximize2, ArrowLeft,
-  Search, X, Filter, MapPin, Layers,
+  Search, X, Filter, MapPin, Layers, AlertTriangle,
   Thermometer, Pencil, Save, GripVertical, Trash2, Plus, Palette, CheckSquare, Square
 } from 'lucide-react'
 

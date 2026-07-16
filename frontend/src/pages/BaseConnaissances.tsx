@@ -1,9 +1,11 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { useAuth } from '../context/AuthContext'
+import toast from 'react-hot-toast'
 import {
   Search, BookOpen, AlertTriangle, Wrench, Clock, ChevronRight,
-  Filter, X, CheckCircle2, XCircle, HelpCircle
+  Filter, X, CheckCircle2, HelpCircle, Plus, Pencil, Trash2, Save, XCircle
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -19,6 +21,24 @@ interface MachineOption {
   id: number; nom: string; ligne: string | null
 }
 
+interface FormData {
+  machine_id: string
+  titre: string
+  description: string
+  criticite: string
+  causes_possibles: string
+  cause_reelle: string
+  solution: string
+  protocole_reparation: string
+  temps_moyen_reparation: string
+}
+
+const EMPTY_FORM: FormData = {
+  machine_id: '', titre: '', description: '', criticite: '3',
+  causes_possibles: '', cause_reelle: '', solution: '',
+  protocole_reparation: '', temps_moyen_reparation: '',
+}
+
 // ─── Constants ────────────────────────────────────────────────────
 const CRITICITE_CONFIG: Record<number, { label: string; color: string; bg: string }> = {
   1: { label: 'Très faible', color: 'text-green-400', bg: 'bg-green-900/30 border-green-800/50' },
@@ -30,6 +50,9 @@ const CRITICITE_CONFIG: Record<number, { label: string; color: string; bg: strin
 
 export default function BaseConnaissances() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const canEdit = user?.role === 'admin' || user?.role === 'manager'
+  const isAdmin = user?.role === 'admin'
 
   const [entries, setEntries] = useState<KnowledgeEntry[]>([])
   const [machines, setMachines] = useState<MachineOption[]>([])
@@ -42,12 +65,15 @@ export default function BaseConnaissances() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [showFilters, setShowFilters] = useState(false)
 
-  // ─── Fetch ──────────────────────────────────────────────────────
-  useEffect(() => {
-    api.get('/machines/?limit=500').then(r => setMachines(r.data))
-  }, [])
+  // ─── Modal state ────────────────────────────────────────────────
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editingEntry, setEditingEntry] = useState<KnowledgeEntry | null>(null)
+  const [form, setForm] = useState<FormData>(EMPTY_FORM)
+  const [saving, setSaving] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
 
-  useEffect(() => {
+  // ─── Fetch ──────────────────────────────────────────────────────
+  const fetchEntries = useCallback(() => {
     setLoading(true)
     const params = new URLSearchParams()
     if (searchQuery) params.set('q', searchQuery)
@@ -60,6 +86,14 @@ export default function BaseConnaissances() {
       .then(r => setEntries(r.data))
       .finally(() => setLoading(false))
   }, [searchQuery, selectedMachine, criticiteMin, criticiteMax, avecSolution])
+
+  useEffect(() => {
+    api.get('/machines/?limit=500').then(r => setMachines(r.data))
+  }, [])
+
+  useEffect(() => {
+    fetchEntries()
+  }, [fetchEntries])
 
   // ─── Stats ──────────────────────────────────────────────────────
   const stats = useMemo(() => ({
@@ -88,18 +122,122 @@ export default function BaseConnaissances() {
 
   const hasActiveFilters = searchQuery || selectedMachine || criticiteMin !== null || criticiteMax !== null || avecSolution
 
+  // ─── Modal helpers ──────────────────────────────────────────────
+  const openCreate = () => {
+    setEditingEntry(null)
+    setForm(EMPTY_FORM)
+    setModalOpen(true)
+  }
+
+  const openEdit = (entry: KnowledgeEntry) => {
+    setEditingEntry(entry)
+    setForm({
+      machine_id: String(entry.machine_id),
+      titre: entry.titre,
+      description: entry.description || '',
+      criticite: String(entry.criticite),
+      causes_possibles: (entry.causes_possibles || []).join(', '),
+      cause_reelle: entry.cause_reelle || '',
+      solution: entry.solution || '',
+      protocole_reparation: entry.protocole_reparation || '',
+      temps_moyen_reparation: entry.temps_moyen_reparation != null ? String(entry.temps_moyen_reparation) : '',
+    })
+    setModalOpen(true)
+  }
+
+  const closeModal = () => {
+    setModalOpen(false)
+    setEditingEntry(null)
+    setForm(EMPTY_FORM)
+  }
+
+  const handleSave = async () => {
+    if (!form.machine_id || !form.titre.trim() || !form.cause_reelle.trim() || !form.solution.trim()) {
+      toast.error('Veuillez remplir les champs obligatoires (Machine, Titre, Cause réelle, Solution)')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const causesArray = form.causes_possibles
+        ? form.causes_possibles.split(',').map(c => c.trim()).filter(Boolean)
+        : []
+
+      if (editingEntry) {
+        // PUT - update
+        const payload: Record<string, unknown> = {
+          solution: form.solution,
+          cause_reelle: form.cause_reelle,
+          protocole_reparation: form.protocole_reparation || null,
+          causes_possibles: causesArray,
+          criticite: Number(form.criticite),
+          temps_moyen_reparation: form.temps_moyen_reparation ? Number(form.temps_moyen_reparation) : null,
+        }
+        await api.put(`/base-connaissances/${editingEntry.id}`, payload)
+        toast.success('Connaissance modifiée avec succès')
+      } else {
+        // POST - create
+        const payload = {
+          machine_id: Number(form.machine_id),
+          titre: form.titre,
+          description: form.description || null,
+          cause_reelle: form.cause_reelle,
+          solution: form.solution,
+          protocole_reparation: form.protocole_reparation || null,
+          criticite: Number(form.criticite),
+          temps_moyen_reparation: form.temps_moyen_reparation ? Number(form.temps_moyen_reparation) : null,
+          causes_possibles: causesArray,
+        }
+        await api.post('/base-connaissances/', payload)
+        toast.success('Connaissance créée avec succès')
+      }
+      closeModal()
+      fetchEntries()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement'
+      toast.error(message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id: number) => {
+    try {
+      await api.delete(`/base-connaissances/${id}`)
+      toast.success('Connaissance supprimée')
+      setDeleteConfirmId(null)
+      if (expandedId === id) setExpandedId(null)
+      fetchEntries()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Erreur lors de la suppression'
+      toast.error(message)
+    }
+  }
+
+  // ─── Render helpers ─────────────────────────────────────────────
+  const inputClass = 'w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500'
+  const labelClass = 'text-xs text-gray-400 mb-1 block font-medium'
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <div className="flex items-center gap-3 mb-1">
-          <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center">
-            <BookOpen size={20} className="text-blue-400" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center">
+              <BookOpen size={20} className="text-blue-400" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-white">Base de Connaissances</h1>
+              <p className="text-gray-400 text-sm">Consultez les pannes résolues et leurs solutions pour intervenir rapidement</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-white">Base de Connaissances</h1>
-            <p className="text-gray-400 text-sm">Consultez les pannes résolues et leurs solutions pour intervenir rapidement</p>
-          </div>
+          {canEdit && (
+            <button onClick={openCreate}
+              className="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-orange-500/20">
+              <Plus size={16} /> Ajouter une connaissance
+            </button>
+          )}
         </div>
       </div>
 
@@ -208,8 +346,6 @@ export default function BaseConnaissances() {
             const crit = CRITICITE_CONFIG[entry.criticite] || CRITICITE_CONFIG[3]
             const isExpanded = expandedId === entry.id
             const hasSolution = !!entry.solution
-            const hasProtocol = !!entry.protocole_reparation
-
             return (
               <div key={entry.id} className={`bg-gray-800 border rounded-xl overflow-hidden transition-colors ${isExpanded ? 'border-orange-500/50' : 'border-gray-700 hover:border-gray-600'}`}>
                 {/* Card header */}
@@ -338,6 +474,32 @@ export default function BaseConnaissances() {
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-xs font-medium transition-colors">
                         Voir la panne complète <ChevronRight size={12} />
                       </button>
+                      {canEdit && (
+                        <button onClick={() => openEdit(entry)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-blue-400 border border-gray-600 rounded-lg text-xs font-medium transition-colors">
+                          <Pencil size={12} /> Modifier
+                        </button>
+                      )}
+                      {isAdmin && (
+                        deleteConfirmId === entry.id ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-red-400">Supprimer cette connaissance ?</span>
+                            <button onClick={() => handleDelete(entry.id)}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition-colors">
+                              <Trash2 size={12} /> Oui, supprimer
+                            </button>
+                            <button onClick={() => setDeleteConfirmId(null)}
+                              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-xs font-medium transition-colors">
+                              Annuler
+                            </button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setDeleteConfirmId(entry.id)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-red-400 border border-gray-600 rounded-lg text-xs font-medium transition-colors">
+                            <Trash2 size={12} /> Supprimer
+                          </button>
+                        )
+                      )}
                       {entry.machine_nom && (
                         <button onClick={() => navigate(`/machines/${entry.machine_id}`)}
                           className="text-xs text-gray-400 hover:text-white transition-colors">
@@ -350,6 +512,154 @@ export default function BaseConnaissances() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* ─── Create / Edit Modal ──────────────────────────────────── */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeModal} />
+
+          {/* Modal */}
+          <div className="relative bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+            {/* Modal header */}
+            <div className="sticky top-0 bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between rounded-t-2xl z-10">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                {editingEntry ? <Pencil size={18} className="text-blue-400" /> : <Plus size={18} className="text-orange-400" />}
+                {editingEntry ? 'Modifier la connaissance' : 'Nouvelle connaissance'}
+              </h2>
+              <button onClick={closeModal} className="text-gray-500 hover:text-white transition-colors">
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className="p-6 space-y-4">
+              {/* Machine + Criticité row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass}>Machine <span className="text-red-400">*</span></label>
+                  <select
+                    value={form.machine_id}
+                    onChange={e => setForm(f => ({ ...f, machine_id: e.target.value }))}
+                    className={inputClass}
+                    disabled={!!editingEntry}
+                  >
+                    <option value="">Sélectionner une machine</option>
+                    {machines.map(m => (
+                      <option key={m.id} value={m.id}>{m.nom}{m.ligne ? ` (${m.ligne})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>Criticité</label>
+                  <select
+                    value={form.criticite}
+                    onChange={e => setForm(f => ({ ...f, criticite: e.target.value }))}
+                    className={inputClass}
+                  >
+                    {[1, 2, 3, 4, 5].map(v => (
+                      <option key={v} value={v}>{v} — {CRITICITE_CONFIG[v].label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Titre */}
+              <div>
+                <label className={labelClass}>Titre <span className="text-red-400">*</span></label>
+                <input
+                  type="text"
+                  value={form.titre}
+                  onChange={e => setForm(f => ({ ...f, titre: e.target.value }))}
+                  className={inputClass}
+                  placeholder="Titre de la panne / connaissance"
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className={labelClass}>Description</label>
+                <textarea
+                  value={form.description}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                  className={`${inputClass} min-h-[80px] resize-y`}
+                  placeholder="Description détaillée du problème..."
+                />
+              </div>
+
+              {/* Causes possibles */}
+              <div>
+                <label className={labelClass}>Causes possibles <span className="text-gray-500 font-normal">(séparées par des virgules)</span></label>
+                <input
+                  type="text"
+                  value={form.causes_possibles}
+                  onChange={e => setForm(f => ({ ...f, causes_possibles: e.target.value }))}
+                  className={inputClass}
+                  placeholder="Usure roulement, manque de lubrifiant, surchauffe..."
+                />
+              </div>
+
+              {/* Cause réelle */}
+              <div>
+                <label className={labelClass}>Cause réelle <span className="text-red-400">*</span></label>
+                <textarea
+                  value={form.cause_reelle}
+                  onChange={e => setForm(f => ({ ...f, cause_reelle: e.target.value }))}
+                  className={`${inputClass} min-h-[80px] resize-y`}
+                  placeholder="Cause identifiée après diagnostic..."
+                />
+              </div>
+
+              {/* Solution */}
+              <div>
+                <label className={labelClass}>Solution <span className="text-red-400">*</span></label>
+                <textarea
+                  value={form.solution}
+                  onChange={e => setForm(f => ({ ...f, solution: e.target.value }))}
+                  className={`${inputClass} min-h-[100px] resize-y`}
+                  placeholder="Solution appliquée pour résoudre le problème..."
+                />
+              </div>
+
+              {/* Protocole de réparation */}
+              <div>
+                <label className={labelClass}>Protocole de réparation</label>
+                <textarea
+                  value={form.protocole_reparation}
+                  onChange={e => setForm(f => ({ ...f, protocole_reparation: e.target.value }))}
+                  className={`${inputClass} min-h-[100px] resize-y`}
+                  placeholder="1. Éteindre la machine&#10;2. Démonter le capot&#10;3. Remplacer la pièce..."
+                />
+              </div>
+
+              {/* Temps moyen */}
+              <div className="max-w-xs">
+                <label className={labelClass}>Temps moyen de réparation <span className="text-gray-500 font-normal">(minutes)</span></label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.temps_moyen_reparation}
+                  onChange={e => setForm(f => ({ ...f, temps_moyen_reparation: e.target.value }))}
+                  className={inputClass}
+                  placeholder="30"
+                />
+              </div>
+            </div>
+
+            {/* Modal footer */}
+            <div className="sticky bottom-0 bg-gray-800 border-t border-gray-700 px-6 py-4 flex items-center justify-end gap-3 rounded-b-2xl">
+              <button onClick={closeModal}
+                className="flex items-center gap-1.5 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-medium transition-colors">
+                <X size={14} /> Annuler
+              </button>
+              <button onClick={handleSave} disabled={saving}
+                className="flex items-center gap-1.5 px-5 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors">
+                <Save size={14} /> {saving ? 'Enregistrement...' : editingEntry ? 'Enregistrer' : 'Créer'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

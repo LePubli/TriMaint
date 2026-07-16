@@ -1,7 +1,9 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
-import { QrCode, ArrowLeft, AlertTriangle, Loader2, Camera, Search, X, Clock, Wrench, CheckCircle, AlertCircle } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { QrCode, ArrowLeft, AlertTriangle, Loader2, Camera, CameraOff, Search, X, Clock, Wrench, CheckCircle, AlertCircle } from 'lucide-react'
+import { Html5Qrcode } from 'html5-qrcode'
 
 /**
  * QR Code lookup page.
@@ -9,10 +11,15 @@ import { QrCode, ArrowLeft, AlertTriangle, Loader2, Camera, Search, X, Clock, Wr
  * with the equipment code (e.g. /equipement/L403).
  * Also handles trimaint://equipement/{CODE} deep links.
  *
+ * When no code is provided, shows a real-time QR scanner using html5-qrcode.
+ * On successful scan, navigates to /equipement/{scannedCode}.
+ *
  * Shows: equipment status (big colored indicator), last 3 pannes with
  * "Signaler" buttons, last 3 interventions, and a big red "Quick Signaler
  * Panne" button. Mobile-first with large touch targets.
  */
+
+const SCANNER_ID = 'qr-scanner-element'
 
 interface MachineData {
   id: number; nom: string; site: string | null; ligne: string | null
@@ -51,7 +58,6 @@ export default function QrLookup() {
   const { code } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Try to get code from deep link query param first
   const deepLinkCode = searchParams.get('code')
@@ -63,9 +69,17 @@ export default function QrLookup() {
   const [interventions, setInterventions] = useState<InterventionItem[]>([])
   const [manualCode, setManualCode] = useState('')
 
+  // Scanner state
+  const [scannerRunning, setScannerRunning] = useState(false)
+  const [scannerError, setScannerError] = useState<string | null>(null)
+  const [scannerInitializing, setScannerInitializing] = useState(false)
+  const scannerRef = useRef<Html5Qrcode | null>(null)
+  const hasScannedRef = useRef(false)
+
   // Determine which code to use
   const effectiveCode = code || deepLinkCode || null
 
+  // ─── Fetch equipment data when code is available ────────────────
   useEffect(() => {
     if (!effectiveCode) {
       setLoading(false)
@@ -92,26 +106,148 @@ export default function QrLookup() {
       .finally(() => setLoading(false))
   }, [effectiveCode])
 
+  // ─── QR Scanner logic ────────────────────────────────────────────
+  const stopScanner = useCallback(async () => {
+    if (scannerRef.current) {
+      try {
+        const state = scannerRef.current.getState()
+        if (state === 2) { // SCANNING
+          await scannerRef.current.stop()
+        }
+      } catch {
+        // Ignore stop errors
+      }
+      try {
+        scannerRef.current.clear()
+      } catch {
+        // Ignore clear errors
+      }
+      scannerRef.current = null
+    }
+    setScannerRunning(false)
+    setScannerInitializing(false)
+  }, [])
+
+  const startScanner = useCallback(async () => {
+    // Clean up any existing scanner instance first
+    await stopScanner()
+
+    setScannerError(null)
+    setScannerInitializing(true)
+    hasScannedRef.current = false
+
+    try {
+      const html5QrCode = new Html5Qrcode(SCANNER_ID)
+      scannerRef.current = html5QrCode
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        disableFlip: false,
+      }
+
+      await html5QrCode.start(
+        { facingMode: 'environment' },
+        config,
+        (decodedText) => {
+          // Prevent multiple navigations from the same scan
+          if (hasScannedRef.current) return
+          hasScannedRef.current = true
+
+          toast.success(`Code scanné: ${decodedText}`)
+          // Extract just the equipment code if it's a URL
+          let equipmentCode = decodedText.trim()
+          // Handle trimaint://equipement/{CODE} deep links
+          if (equipmentCode.includes('equipement/')) {
+            const parts = equipmentCode.split('equipement/')
+            if (parts.length > 1) {
+              equipmentCode = parts[1].split(/[/?#]/)[0]
+            }
+          }
+          // Handle full URLs
+          if (equipmentCode.startsWith('http')) {
+            try {
+              const url = new URL(equipmentCode)
+              const pathMatch = url.pathname.match(/\/equipement\/([^/]+)/)
+              if (pathMatch) {
+                equipmentCode = pathMatch[1]
+              }
+            } catch {
+              // If URL parsing fails, use as-is
+            }
+          }
+
+          stopScanner()
+          navigate(`/equipement/${encodeURIComponent(equipmentCode)}`, { replace: true })
+        },
+        () => {
+          // QR code not found in this frame - this is normal, ignore
+        }
+      )
+
+      setScannerRunning(true)
+      setScannerInitializing(false)
+    } catch (err: unknown) {
+      setScannerRunning(false)
+      setScannerInitializing(false)
+      const errorMessage = err instanceof Error ? err.message : String(err)
+
+      if (
+        errorMessage.includes('Permission') ||
+        errorMessage.includes('NotAllowedError') ||
+        errorMessage.includes('permission')
+      ) {
+        setScannerError('Accès à la caméra refusé. Veuillez autoriser l\'accès à la caméra dans les paramètres de votre navigateur, puis rechargez la page.')
+        toast.error('Accès caméra refusé')
+      } else if (
+        errorMessage.includes('NotFound') ||
+        errorMessage.includes('Requested device not found')
+      ) {
+        setScannerError('Aucune caméra trouvée. Vérifiez que votre appareil dispose d\'une caméra.')
+        toast.error('Caméra non trouvée')
+      } else {
+        setScannerError(`Impossible de démarrer le scanner: ${errorMessage}`)
+        toast.error('Erreur du scanner')
+      }
+
+      // Clean up the failed instance
+      try {
+        if (scannerRef.current) {
+          scannerRef.current.clear()
+        }
+      } catch {
+        // Ignore
+      }
+      scannerRef.current = null
+    }
+  }, [navigate, stopScanner])
+
+  // Start scanner automatically when no code is provided
+  useEffect(() => {
+    if (!effectiveCode && !machine) {
+      // Small delay to ensure DOM element is ready
+      const timer = setTimeout(() => {
+        startScanner()
+      }, 300)
+      return () => {
+        clearTimeout(timer)
+        stopScanner()
+      }
+    }
+  }, [effectiveCode, machine, startScanner, stopScanner])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopScanner()
+    }
+  }, [stopScanner])
+
   const handleManualSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (!manualCode.trim()) return
     navigate(`/equipement/${encodeURIComponent(manualCode.trim())}`, { replace: true })
-  }
-
-  const handleFileCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    // On mobile, the camera capture gives us an image.
-    // For QR decoding we would need a library; here we just let the user
-    // type the code manually. Reset the input so they can try again.
-    toast_feedback('Prenez le QR code en photo puis saisissez le code manuellement')
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  const toast_feedback = (msg: string) => {
-    // Simple visual feedback without importing toast for this lightweight page
-    setError(msg)
-    setTimeout(() => setError(null), 3000)
   }
 
   // ─── Loading state ──────────────────────────────────────────────
@@ -130,41 +266,109 @@ export default function QrLookup() {
       <div className="h-full bg-gray-900 flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 bg-gray-800 border-b border-gray-700 shrink-0">
-          <button onClick={() => navigate('/')} className="p-2 rounded-lg hover:bg-gray-700 text-gray-300">
+          <button onClick={() => { stopScanner(); navigate('/') }} className="p-2 rounded-lg hover:bg-gray-700 text-gray-300">
             <ArrowLeft size={20} />
           </button>
           <h1 className="text-white font-semibold text-lg">Scanner QR Code</h1>
         </div>
 
-        <div className="flex-1 flex flex-col items-center justify-center px-6 gap-6">
-          {/* Big camera button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="w-36 h-36 rounded-full bg-orange-500 hover:bg-orange-600 flex flex-col items-center justify-center gap-3 shadow-lg shadow-orange-500/30 transition-all active:scale-95"
-          >
-            <Camera size={40} className="text-white" />
-            <span className="text-white text-sm font-semibold">Scanner</span>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileCapture}
-            className="hidden"
-          />
+        <div className="flex-1 flex flex-col items-center px-4 py-4 gap-4 overflow-y-auto">
+          {/* Scanner region with viewfinder frame */}
+          <div className="relative w-full max-w-sm mx-auto">
+            {/* Outer viewfinder frame */}
+            <div className="relative rounded-2xl overflow-hidden border-2 border-gray-600 bg-black">
+              {/* Scanner video element container */}
+              <div
+                id={SCANNER_ID}
+                className="w-full"
+                style={{ minHeight: '300px' }}
+              />
 
-          <p className="text-gray-500 text-sm text-center">Ouvrez l'appareil photo pour scanner un QR code</p>
+              {/* Viewfinder overlay - only show when scanner is running */}
+              {scannerRunning && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  {/* Corner brackets */}
+                  <div className="relative w-[250px] h-[250px]">
+                    {/* Top-left corner */}
+                    <div className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 border-orange-500 rounded-tl-lg" style={{ borderTopWidth: '3px', borderLeftWidth: '3px' }} />
+                    {/* Top-right corner */}
+                    <div className="absolute top-0 right-0 w-8 h-8 border-t-3 border-r-3 border-orange-500 rounded-tr-lg" style={{ borderTopWidth: '3px', borderRightWidth: '3px' }} />
+                    {/* Bottom-left corner */}
+                    <div className="absolute bottom-0 left-0 w-8 h-8 border-b-3 border-l-3 border-orange-500 rounded-bl-lg" style={{ borderBottomWidth: '3px', borderLeftWidth: '3px' }} />
+                    {/* Bottom-right corner */}
+                    <div className="absolute bottom-0 right-0 w-8 h-8 border-b-3 border-r-3 border-orange-500 rounded-br-lg" style={{ borderBottomWidth: '3px', borderRightWidth: '3px' }} />
+                    {/* Scanning line animation */}
+                    <div className="absolute left-2 right-2 h-0.5 bg-orange-500/70 animate-pulse" style={{ top: '50%' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Initializing overlay */}
+              {scannerInitializing && (
+                <div className="absolute inset-0 bg-gray-900/80 flex flex-col items-center justify-center gap-3">
+                  <Loader2 size={36} className="text-orange-400 animate-spin" />
+                  <p className="text-gray-300 text-sm">Démarrage du scanner...</p>
+                </div>
+              )}
+
+              {/* Error overlay */}
+              {scannerError && !scannerRunning && (
+                <div className="absolute inset-0 bg-gray-900/90 flex flex-col items-center justify-center gap-3 px-6">
+                  <CameraOff size={36} className="text-red-400" />
+                  <p className="text-gray-300 text-sm text-center">{scannerError}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Scanner status indicator */}
+            <div className="flex items-center justify-center gap-2 mt-2">
+              {scannerRunning && (
+                <div className="flex items-center gap-2 text-green-400">
+                  <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-xs font-medium">Scanner actif</span>
+                </div>
+              )}
+              {!scannerRunning && !scannerInitializing && !scannerError && (
+                <span className="text-xs text-gray-500">Scanner arrêté</span>
+              )}
+            </div>
+          </div>
+
+          {/* Scanner controls */}
+          <div className="flex items-center gap-3 w-full max-w-sm">
+            {scannerRunning ? (
+              <button
+                onClick={stopScanner}
+                className="flex-1 flex items-center justify-center gap-2 py-3 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-400 rounded-xl transition-colors font-medium min-h-[48px]"
+              >
+                <CameraOff size={18} />
+                Arrêter le scanner
+              </button>
+            ) : (
+              <button
+                onClick={startScanner}
+                disabled={scannerInitializing}
+                className="flex-1 flex items-center justify-center gap-2 py-3 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-xl transition-colors font-medium min-h-[48px]"
+              >
+                {scannerInitializing ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Camera size={18} />
+                )}
+                {scannerInitializing ? 'Démarrage...' : 'Démarrer le scanner'}
+              </button>
+            )}
+          </div>
 
           {/* Divider */}
-          <div className="flex items-center gap-3 w-full max-w-xs">
+          <div className="flex items-center gap-3 w-full max-w-sm">
             <div className="flex-1 h-px bg-gray-700" />
-            <span className="text-gray-500 text-xs">ou</span>
+            <span className="text-gray-500 text-xs">ou saisir manuellement</span>
             <div className="flex-1 h-px bg-gray-700" />
           </div>
 
           {/* Manual code input */}
-          <form onSubmit={handleManualSearch} className="w-full max-w-xs">
+          <form onSubmit={handleManualSearch} className="w-full max-w-sm">
             <div className="relative">
               <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
               <input

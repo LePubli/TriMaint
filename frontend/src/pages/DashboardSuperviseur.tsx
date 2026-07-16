@@ -7,35 +7,61 @@ import {
   ChevronRight, Zap
 } from 'lucide-react'
 
+/* ─── Backend response shape (matches /api/kpi/dashboard exactly) ─── */
 interface KPIData {
   mttr: number
   mtbf: number
   taux_disponibilite: number
-  taux_resolution: number
-  mttr_trend: number | null
-  mtbf_trend: number | null
+  taux_pannes_resolues: number
+  top_machines_pannes: { machine_id: number; machine_nom: string; panne_count: number }[]
   pannes_par_zone: { zone: string; count: number }[]
+  pannes_par_type: { type_equipement: string; count: number }[]
   interventions_par_technicien: { technicien: string; count: number }[]
-  machines_fragiles: { machine_nom: string; nb_pannes: number; criticite_moyenne: number }[]
-  pieces_utilisees: { piece_nom: string; reference: string; total_utilise: number }[]
-  tendance_mensuelle: { mois: string; pannes: number }[]
-  pannes_recentes: { id: number; titre: string; machine_nom: string; created_at: string; criticite: number }[]
+  temps_par_technicien: { technicien: string; total_minutes: number }[]
+  pieces_utilisees: { piece_id: number; reference: string; nom: string; total_utilisee: number }[]
+  monthly_trend: { year: number; month: number; count: number }[]
 }
 
-const criticiteColor = (c: number) => {
-  if (c >= 4) return 'text-red-400'
-  if (c >= 3) return 'text-yellow-400'
-  return 'text-green-400'
+/* ─── Separate fetch for pannes récentes (/api/pannes/?limit=5) ─── */
+interface PanneRecente {
+  id: number
+  titre: string
+  machine_id: number
+  machine_nom?: string | null
+  created_at: string
+  criticite: number
+}
+
+const MOIS_NOMS = [
+  'Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin',
+  'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc',
+]
+
+/** Convert monthly_trend entries to display-ready objects with French month label */
+function formatMonthlyTrend(
+  trend: KPIData['monthly_trend'],
+): { mois: string; pannes: number }[] {
+  return trend.map(m => ({
+    mois: `${MOIS_NOMS[m.month - 1]} ${m.year}`,
+    pannes: m.count,
+  }))
 }
 
 export default function DashboardSuperviseur() {
   const navigate = useNavigate()
   const [data, setData] = useState<KPIData | null>(null)
+  const [pannesRecentes, setPannesRecentes] = useState<PanneRecente[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get('/kpi/dashboard')
-      .then(r => setData(r.data))
+    Promise.all([
+      api.get('/kpi/dashboard').then(r => r.data),
+      api.get('/pannes/', { params: { limit: 5 } }).then(r => r.data),
+    ])
+      .then(([kpiData, recentPannes]) => {
+        setData(kpiData)
+        setPannesRecentes(recentPannes)
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -65,10 +91,11 @@ export default function DashboardSuperviseur() {
     )
   }
 
-  // Chart helpers
+  // Derived data for charts
+  const tendanceMensuelle = formatMonthlyTrend(data.monthly_trend)
   const maxZonePannes = Math.max(...data.pannes_par_zone.map(z => z.count), 1)
   const maxTechnicien = Math.max(...data.interventions_par_technicien.map(t => t.count), 1)
-  const maxMensuel = Math.max(...data.tendance_mensuelle.map(m => m.pannes), 1)
+  const maxMensuel = Math.max(...tendanceMensuelle.map(m => m.pannes), 1)
 
   return (
     <div className="p-4 md:p-6 min-h-screen">
@@ -92,7 +119,7 @@ export default function DashboardSuperviseur() {
           value={`${data.mttr}`}
           unit="min"
           bg="bg-blue-500/10"
-          trend={data.mttr_trend}
+          trend={null}
         />
 
         {/* MTBF */}
@@ -102,7 +129,7 @@ export default function DashboardSuperviseur() {
           value={`${data.mtbf}`}
           unit="h"
           bg="bg-purple-500/10"
-          trend={data.mtbf_trend}
+          trend={null}
           trendInverted
         />
 
@@ -133,17 +160,17 @@ export default function DashboardSuperviseur() {
             <CheckCircle className="text-orange-400" size={22} />
           </div>
           <p className="text-3xl font-bold text-white">
-            {data.taux_resolution.toFixed(1)}
+            {data.taux_pannes_resolues.toFixed(1)}
             <span className="text-base font-normal text-gray-400 ml-0.5">%</span>
           </p>
           <p className="text-sm text-gray-400 mt-1">Taux de résolution</p>
           <div className="mt-3 h-2 bg-gray-700 rounded-full overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-700 ${
-                data.taux_resolution >= 80 ? 'bg-green-500' :
-                data.taux_resolution >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                data.taux_pannes_resolues >= 80 ? 'bg-green-500' :
+                data.taux_pannes_resolues >= 50 ? 'bg-yellow-500' : 'bg-red-500'
               }`}
-              style={{ width: `${Math.min(100, data.taux_resolution)}%` }}
+              style={{ width: `${Math.min(100, data.taux_pannes_resolues)}%` }}
             />
           </div>
         </div>
@@ -216,22 +243,19 @@ export default function DashboardSuperviseur() {
             <AlertTriangle size={16} className="text-orange-400" />
             Top 5 machines les plus fragiles
           </h2>
-          {data.machines_fragiles.length === 0 ? (
+          {data.top_machines_pannes.length === 0 ? (
             <p className="text-gray-500 text-sm">Aucune donnée</p>
           ) : (
             <div className="space-y-2">
-              {data.machines_fragiles.map((m, i) => (
+              {data.top_machines_pannes.map((m, i) => (
                 <div key={i} className="flex items-center justify-between p-2.5 bg-gray-900 rounded-lg border border-gray-700">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="text-xs font-bold text-gray-500 w-4">{i + 1}</span>
                     <span className="text-sm text-white truncate">{m.machine_nom}</span>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className={`text-xs font-semibold ${criticiteColor(m.criticite_moyenne)}`}>
-                      Crit. {m.criticite_moyenne.toFixed(1)}
-                    </span>
                     <span className="text-xs bg-red-900/40 text-red-300 px-2 py-0.5 rounded border border-red-800">
-                      {m.nb_pannes} panne{m.nb_pannes > 1 ? 's' : ''}
+                      {m.panne_count} panne{m.panne_count > 1 ? 's' : ''}
                     </span>
                   </div>
                 </div>
@@ -255,11 +279,11 @@ export default function DashboardSuperviseur() {
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className="text-xs font-bold text-gray-500 w-4">{i + 1}</span>
                     <div className="min-w-0">
-                      <p className="text-sm text-white truncate">{p.piece_nom}</p>
+                      <p className="text-sm text-white truncate">{p.nom}</p>
                       <p className="text-[10px] text-gray-500 font-mono">{p.reference}</p>
                     </div>
                   </div>
-                  <span className="text-sm font-bold text-green-400 shrink-0">{p.total_utilise}</span>
+                  <span className="text-sm font-bold text-green-400 shrink-0">{p.total_utilisee}</span>
                 </div>
               ))}
             </div>
@@ -275,7 +299,7 @@ export default function DashboardSuperviseur() {
             <TrendingUp size={16} className="text-orange-400" />
             Tendance mensuelle (12 mois)
           </h2>
-          {data.tendance_mensuelle.length === 0 ? (
+          {tendanceMensuelle.length === 0 ? (
             <p className="text-gray-500 text-sm">Aucune donnée</p>
           ) : (
             <div className="relative">
@@ -307,8 +331,8 @@ export default function DashboardSuperviseur() {
                     <polygon
                       fill="url(#lineGrad)"
                       points={
-                        data.tendance_mensuelle.map((m, i) => {
-                          const x = (i / (data.tendance_mensuelle.length - 1)) * 100
+                        tendanceMensuelle.map((m, i) => {
+                          const x = (i / (tendanceMensuelle.length - 1)) * 100
                           const y = 100 - (m.pannes / maxMensuel) * 95
                           return `${x},${y}`
                         }).join(' ') +
@@ -322,16 +346,16 @@ export default function DashboardSuperviseur() {
                       strokeWidth="2"
                       vectorEffect="non-scaling-stroke"
                       points={
-                        data.tendance_mensuelle.map((m, i) => {
-                          const x = (i / (data.tendance_mensuelle.length - 1)) * 100
+                        tendanceMensuelle.map((m, i) => {
+                          const x = (i / (tendanceMensuelle.length - 1)) * 100
                           const y = 100 - (m.pannes / maxMensuel) * 95
                           return `${x},${y}`
                         }).join(' ')
                       }
                     />
                     {/* Dots */}
-                    {data.tendance_mensuelle.map((m, i) => {
-                      const x = (i / (data.tendance_mensuelle.length - 1)) * 100
+                    {tendanceMensuelle.map((m, i) => {
+                      const x = (i / (tendanceMensuelle.length - 1)) * 100
                       const y = 100 - (m.pannes / maxMensuel) * 95
                       return (
                         <circle key={i} cx={x} cy={y} r="1.5" fill="#f97316" stroke="#1f2937" strokeWidth="0.5" />
@@ -342,9 +366,9 @@ export default function DashboardSuperviseur() {
 
                 {/* X axis labels */}
                 <div className="flex justify-between mt-1.5 text-[10px] text-gray-500">
-                  {data.tendance_mensuelle.map((m, i) => (
+                  {tendanceMensuelle.map((m, i) => (
                     <span key={i} className={
-                      data.tendance_mensuelle.length > 8
+                      tendanceMensuelle.length > 8
                         ? i % 2 === 0 ? '' : 'hidden'
                         : ''
                     }>
@@ -363,11 +387,11 @@ export default function DashboardSuperviseur() {
             <Zap size={16} className="text-red-400" />
             Pannes récentes
           </h2>
-          {data.pannes_recentes.length === 0 ? (
+          {pannesRecentes.length === 0 ? (
             <p className="text-gray-500 text-sm">Aucune panne récente</p>
           ) : (
             <div className="space-y-2">
-              {data.pannes_recentes.map(p => (
+              {pannesRecentes.map(p => (
                 <button
                   key={p.id}
                   onClick={() => navigate(`/pannes/${p.id}`)}
@@ -379,7 +403,7 @@ export default function DashboardSuperviseur() {
                         {p.titre}
                       </p>
                       <p className="text-xs text-gray-400 mt-0.5 truncate">
-                        {p.machine_nom} · {new Date(p.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
+                        {p.machine_nom || `Machine #${p.machine_id}`} · {new Date(p.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">

@@ -1,12 +1,39 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from pydantic import BaseModel
+from typing import Optional, List
 from app.db.database import get_db
 from app.models.panne import Panne
-from app.core.security import get_current_user
+from app.core.security import get_current_user, require_manager_or_admin, require_admin
+from app.core.activity import log_activity
 
 router = APIRouter(prefix="/api/base-connaissances", tags=["base-connaissances"])
 
+
+# ─── Schémas Pydantic ────────────────────────────────────────────────────────
+
+class KnowledgeCreate(BaseModel):
+    machine_id: int
+    titre: str
+    description: Optional[str] = None
+    cause_reelle: str
+    solution: str
+    protocole_reparation: Optional[str] = None
+    criticite: int = 3
+    temps_moyen_reparation: Optional[int] = None
+    causes_possibles: Optional[List[str]] = None
+
+
+class KnowledgeUpdate(BaseModel):
+    solution: Optional[str] = None
+    protocole_reparation: Optional[str] = None
+    cause_reelle: Optional[str] = None
+    causes_possibles: Optional[List[str]] = None
+    criticite: Optional[int] = None
+    temps_moyen_reparation: Optional[int] = None
+
+
+# ─── GET – Recherche dans la base de connaissances ──────────────────────────
 
 @router.get("/")
 def search_knowledge(
@@ -65,3 +92,107 @@ def search_knowledge(
         })
 
     return results
+
+
+# ─── POST – Créer une entrée dans la base de connaissances ──────────────────
+
+@router.post("/")
+def create_knowledge(
+    body: KnowledgeCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_manager_or_admin),
+):
+    """Crée une nouvelle entrée de connaissance (panne résolue avec solution)."""
+    panne = Panne(
+        machine_id=body.machine_id,
+        titre=body.titre,
+        description=body.description,
+        cause_reelle=body.cause_reelle,
+        solution=body.solution,
+        protocole_reparation=body.protocole_reparation,
+        criticite=body.criticite,
+        temps_moyen_reparation=body.temps_moyen_reparation,
+        causes_possibles=body.causes_possibles or [],
+    )
+    db.add(panne)
+    db.commit()
+    db.refresh(panne)
+    log_activity(db, current_user, "créé", "base_connaissances", panne.id, panne.titre)
+    return {
+        "id": panne.id,
+        "machine_id": panne.machine_id,
+        "machine_nom": panne.machine.nom if panne.machine else None,
+        "titre": panne.titre,
+        "description": panne.description,
+        "cause_reelle": panne.cause_reelle,
+        "solution": panne.solution,
+        "protocole_reparation": panne.protocole_reparation,
+        "criticite": panne.criticite,
+        "temps_moyen_reparation": panne.temps_moyen_reparation,
+        "causes_possibles": panne.causes_possibles or [],
+        "updated_at": panne.updated_at.isoformat() if panne.updated_at else None,
+    }
+
+
+# ─── PUT – Modifier une entrée de la base de connaissances ──────────────────
+
+@router.put("/{panne_id}")
+def update_knowledge(
+    panne_id: int,
+    body: KnowledgeUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_manager_or_admin),
+):
+    """Met à jour les champs solution d'une entrée de la base de connaissances."""
+    panne = db.query(Panne).filter(Panne.id == panne_id).first()
+    if not panne:
+        raise HTTPException(status_code=404, detail="Entrée introuvable")
+
+    update_data = body.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(panne, key, value)
+
+    db.commit()
+    db.refresh(panne)
+    log_activity(db, current_user, "modifié", "base_connaissances", panne.id, panne.titre)
+    return {
+        "id": panne.id,
+        "machine_id": panne.machine_id,
+        "machine_nom": panne.machine.nom if panne.machine else None,
+        "titre": panne.titre,
+        "description": panne.description,
+        "cause_reelle": panne.cause_reelle,
+        "solution": panne.solution,
+        "protocole_reparation": panne.protocole_reparation,
+        "criticite": panne.criticite,
+        "temps_moyen_reparation": panne.temps_moyen_reparation,
+        "causes_possibles": panne.causes_possibles or [],
+        "updated_at": panne.updated_at.isoformat() if panne.updated_at else None,
+    }
+
+
+# ─── DELETE – Supprimer une entrée de la base de connaissances ──────────────
+
+@router.delete("/{panne_id}")
+def delete_knowledge(
+    panne_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Supprime une entrée de la base de connaissances (admin uniquement)."""
+    panne = db.query(Panne).filter(Panne.id == panne_id).first()
+    if not panne:
+        raise HTTPException(status_code=404, detail="Entrée introuvable")
+
+    label = panne.titre
+    try:
+        db.delete(panne)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Impossible de supprimer cette entrée : des interventions ou pièces y sont liées",
+        )
+    log_activity(db, current_user, "supprimé", "base_connaissances", panne_id, label)
+    return {"ok": True}

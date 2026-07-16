@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle, AlertTriangle, Clock, X, List, Calendar } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import { ArrowLeft, ChevronLeft, ChevronRight, CheckCircle, AlertTriangle, Clock, X, List, Calendar, Plus, Edit2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface MaintenanceTask {
@@ -21,9 +22,34 @@ interface MaintenanceTask {
   prochaine_echeance?: string | null
 }
 
+interface MachineOption {
+  id: number
+  nom: string
+}
+
 interface DayTasks {
   date: string // YYYY-MM-DD
   tasks: (MaintenanceTask & { computedStatus: 'ok' | 'bientot' | 'en_retard' })[]
+}
+
+interface TaskFormData {
+  machine_id: string
+  titre: string
+  description: string
+  frequence_jours: string
+  responsable: string
+  alert_jours: string
+  actif: boolean
+}
+
+const emptyForm: TaskFormData = {
+  machine_id: '',
+  titre: '',
+  description: '',
+  frequence_jours: '30',
+  responsable: '',
+  alert_jours: '7',
+  actif: true,
 }
 
 const MONTH_NAMES = [
@@ -119,11 +145,22 @@ function getStatusLabel(status: 'ok' | 'bientot' | 'en_retard', joursRestants?: 
 
 export default function CalendarMaintenance() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const canEdit = user?.role === 'admin' || user?.role === 'manager'
+
   const [tasks, setTasks] = useState<MaintenanceTask[]>([])
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<'calendar' | 'liste'>('calendar')
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
+
+  // CRUD state
+  const [machines, setMachines] = useState<MachineOption[]>([])
+  const [showModal, setShowModal] = useState(false)
+  const [editTask, setEditTask] = useState<MaintenanceTask | null>(null)
+  const [form, setForm] = useState<TaskFormData>(emptyForm)
+  const [formSubmitting, setFormSubmitting] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<MaintenanceTask | null>(null)
 
   const year = currentDate.getFullYear()
   const month = currentDate.getMonth()
@@ -135,7 +172,13 @@ export default function CalendarMaintenance() {
       .finally(() => setLoading(false))
   }, [])
 
+  const fetchMachines = useCallback(() => {
+    api.get('/machines/', { params: { limit: 500 } })
+      .then(r => setMachines(r.data))
+  }, [])
+
   useEffect(() => { fetchTasks() }, [fetchTasks])
+  useEffect(() => { fetchMachines() }, [fetchMachines])
 
   const dayTasksMap = useMemo(() => {
     const map = new Map<string, DayTasks['tasks']>()
@@ -202,6 +245,79 @@ export default function CalendarMaintenance() {
     }
   }
 
+  // --- CRUD handlers ---
+
+  const openCreateModal = () => {
+    setEditTask(null)
+    setForm(emptyForm)
+    setShowModal(true)
+  }
+
+  const openEditModal = (task: MaintenanceTask) => {
+    setEditTask(task)
+    setForm({
+      machine_id: String(task.machine_id),
+      titre: task.titre,
+      description: task.description || '',
+      frequence_jours: String(task.frequence_jours),
+      responsable: task.responsable || '',
+      alert_jours: String(task.alert_jours),
+      actif: task.actif,
+    })
+    setShowModal(true)
+  }
+
+  const closeModal = () => {
+    setShowModal(false)
+    setEditTask(null)
+    setForm(emptyForm)
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.machine_id || !form.titre.trim()) {
+      toast.error('Machine et titre sont requis')
+      return
+    }
+    const payload = {
+      machine_id: Number(form.machine_id),
+      titre: form.titre.trim(),
+      description: form.description.trim() || null,
+      frequence_jours: Number(form.frequence_jours) || 30,
+      responsable: form.responsable.trim() || null,
+      alert_jours: Number(form.alert_jours) || 7,
+      actif: form.actif,
+    }
+    setFormSubmitting(true)
+    try {
+      if (editTask) {
+        await api.put(`/maintenance-preventive/${editTask.id}`, payload)
+        toast.success('Tâche mise à jour')
+      } else {
+        await api.post('/maintenance-preventive/', payload)
+        toast.success('Tâche créée')
+      }
+      closeModal()
+      fetchTasks()
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Erreur lors de l\'enregistrement')
+    } finally {
+      setFormSubmitting(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteConfirm) return
+    try {
+      await api.delete(`/maintenance-preventive/${deleteConfirm.id}`)
+      toast.success('Tâche supprimée')
+      setDeleteConfirm(null)
+      fetchTasks()
+    } catch {
+      toast.error('Erreur lors de la suppression')
+    }
+  }
+
   const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`
 
   if (loading) {
@@ -230,13 +346,24 @@ export default function CalendarMaintenance() {
             <p className="text-gray-400 text-xs md:text-sm mt-0.5">Vue calendrier des échéances</p>
           </div>
         </div>
-        <button
-          onClick={() => setViewMode('liste')}
-          className="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-gray-600 rounded-lg text-sm transition-colors"
-        >
-          <List size={16} />
-          <span className="hidden sm:inline">Liste</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <button
+              onClick={openCreateModal}
+              className="flex items-center gap-2 px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              <Plus size={16} />
+              <span className="hidden sm:inline">Nouvelle tâche</span>
+            </button>
+          )}
+          <button
+            onClick={() => setViewMode('liste')}
+            className="flex items-center gap-2 px-3 py-2 bg-gray-800 border border-gray-700 text-gray-300 hover:text-white hover:border-gray-600 rounded-lg text-sm transition-colors"
+          >
+            <List size={16} />
+            <span className="hidden sm:inline">Liste</span>
+          </button>
+        </div>
       </div>
 
       {/* Month navigation */}
@@ -354,6 +481,24 @@ export default function CalendarMaintenance() {
                         <StatusIcon size={11} />
                         {getStatusLabel(t.computedStatus, t.jours_restants)}
                       </span>
+                      {canEdit && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => openEditModal(t)}
+                            className="p-1 text-gray-400 hover:text-blue-400 transition-colors"
+                            title="Modifier"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirm(t)}
+                            className="p-1 text-gray-400 hover:text-red-400 transition-colors"
+                            title="Supprimer"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <h4 className="text-white font-medium text-sm">{t.titre}</h4>
@@ -399,6 +544,172 @@ export default function CalendarMaintenance() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Create / Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/60" onClick={closeModal} />
+
+          {/* Modal */}
+          <div className="relative bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="sticky top-0 bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-white font-semibold text-lg">
+                {editTask ? 'Modifier la tâche' : 'Nouvelle tâche de maintenance'}
+              </h3>
+              <button onClick={closeModal} className="p-1.5 text-gray-400 hover:text-white transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              {/* Machine */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Machine *</label>
+                <select
+                  value={form.machine_id}
+                  onChange={e => setForm({ ...form, machine_id: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                >
+                  <option value="">-- Sélectionner une machine --</option>
+                  {machines.map(m => (
+                    <option key={m.id} value={m.id}>{m.nom}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Titre */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Titre *</label>
+                <input
+                  type="text"
+                  value={form.titre}
+                  onChange={e => setForm({ ...form, titre: e.target.value })}
+                  required
+                  placeholder="Ex: Vérification courroies"
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent placeholder-gray-600"
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Description</label>
+                <textarea
+                  value={form.description}
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                  rows={3}
+                  placeholder="Description de la tâche..."
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent placeholder-gray-600 resize-none"
+                />
+              </div>
+
+              {/* Fréquence & Alert */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Fréquence (jours)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.frequence_jours}
+                    onChange={e => setForm({ ...form, frequence_jours: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-900 border border-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">Alerte (jours avant)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.alert_jours}
+                    onChange={e => setForm({ ...form, alert_jours: e.target.value })}
+                    className="w-full px-3 py-2 bg-gray-900 border border-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              {/* Responsable */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Responsable</label>
+                <input
+                  type="text"
+                  value={form.responsable}
+                  onChange={e => setForm({ ...form, responsable: e.target.value })}
+                  placeholder="Ex: Jean Dupont"
+                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent placeholder-gray-600"
+                />
+              </div>
+
+              {/* Actif toggle */}
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-gray-300">Tâche active</label>
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, actif: !form.actif })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.actif ? 'bg-orange-500' : 'bg-gray-600'}`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${form.actif ? 'translate-x-6' : 'translate-x-1'}`}
+                  />
+                </button>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={formSubmitting}
+                  className="px-4 py-2 text-sm font-medium text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {formSubmitting && (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                  )}
+                  {editTask ? 'Enregistrer' : 'Créer la tâche'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setDeleteConfirm(null)} />
+          <div className="relative bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center justify-center w-10 h-10 rounded-full bg-red-900/40 border border-red-700">
+                <Trash2 size={18} className="text-red-400" />
+              </div>
+              <h3 className="text-white font-semibold">Supprimer cette tâche ?</h3>
+            </div>
+            <p className="text-gray-400 text-sm mb-6">
+              Supprimer la tâche de maintenance <span className="text-white font-medium">"{deleteConfirm.titre}"</span> ? Cette action est irréversible.
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleDelete}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 rounded-lg transition-colors"
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

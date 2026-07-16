@@ -7,7 +7,8 @@ from app.db.database import get_db
 from app.models.machine import Machine
 from app.models.convoyeur import Convoyeur
 from app.schemas.machine import MachineCreate, MachineUpdate, MachineOut
-from app.core.security import get_current_user, require_manager_or_admin
+from pydantic import BaseModel
+from app.core.security import get_current_user, require_manager_or_admin, require_admin
 from app.core.activity import log_activity
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
@@ -82,8 +83,6 @@ def get_schema_data(
                 "ligne": m.ligne,
                 "pos_x": m.pos_x,
                 "pos_y": m.pos_y,
-                "couleur": m.couleur,
-                "taille_pastille": m.taille_pastille,
                 "type": "machine",
             }
             for m in machines
@@ -128,6 +127,62 @@ def list_lignes(db: Session = Depends(get_db), _=Depends(get_current_user)):
         l["zones"] = list(l["zones"].values())
         result.append(l)
     return result
+
+
+class LigneRenameBody(BaseModel):
+    ancien_nom: str
+    nouveau_nom: str
+
+
+class LigneDeleteBody(BaseModel):
+    nom: str
+
+
+@router.post("/meta/lignes")
+def rename_ligne(
+    body: LigneRenameBody,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_manager_or_admin),
+):
+    """Renommer une ligne de production (met à jour le champ ligne de toutes les machines concernées)."""
+    ancien = body.ancien_nom.strip()
+    nouveau = body.nouveau_nom.strip()
+
+    if not ancien:
+        return {"ok": True, "affected": 0}
+
+    if ancien == nouveau:
+        return {"ok": True, "affected": 0}
+
+    count = (
+        db.query(Machine)
+        .filter(Machine.ligne == ancien)
+        .update({"ligne": nouveau}, synchronize_session="fetch")
+    )
+    db.commit()
+    log_activity(db, current_user, "renommé", "ligne", None, f"{ancien} → {nouveau}")
+    return {"ok": True, "affected": count}
+
+
+@router.delete("/meta/lignes")
+def delete_ligne(
+    body: LigneDeleteBody,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Supprimer une ligne de production (met ligne à NULL sur toutes les machines concernées)."""
+    nom = body.nom.strip()
+    if not nom:
+        raise HTTPException(status_code=400, detail="Le nom de la ligne est requis")
+
+    count = (
+        db.query(Machine)
+        .filter(Machine.ligne == nom)
+        .update({"ligne": None}, synchronize_session="fetch")
+    )
+    db.commit()
+    log_activity(db, current_user, "supprimé", "ligne", None, nom)
+    return {"ok": True, "affected": count}
 
 
 def _ensure_qr(machine: Machine, db: Session):

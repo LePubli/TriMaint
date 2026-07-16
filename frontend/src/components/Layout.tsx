@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Wrench, AlertTriangle, ClipboardList,
   Package, Search, LogOut, Users, BarChart2, RefreshCw, Factory,
-  Map, BookOpen, ChevronDown, QrCode, MoreHorizontal, Menu,
+  Map, BookOpen, ChevronDown, MoreHorizontal, Menu,
   Calendar, X, Shield
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
@@ -38,7 +38,7 @@ const roleLabels: Record<string, string> = {
 const bottomNavTabs = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/schema', label: 'Schéma', icon: Map },
-  { to: '/equipement', label: 'Scanner QR', icon: QrCode },
+  { to: '/lignes', label: 'Lignes', icon: Factory },
   { to: '/pannes', label: 'Pannes', icon: AlertTriangle },
   { to: 'more', label: 'Plus', icon: MoreHorizontal },
 ]

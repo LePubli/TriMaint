@@ -4,7 +4,7 @@ import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import {
   ZoomIn, ZoomOut, Maximize2, ArrowLeft,
-  Search, X, Filter, MapPin, Layers, QrCode,
+  Search, X, Filter, MapPin, Layers,
   ChevronUp, ChevronDown, Thermometer
 } from 'lucide-react'
 
@@ -73,6 +73,26 @@ const STATUT_DOT: Record<string, string> = {
 
 // ─── Hotspot size (responsive) ────────────────────────────────────
 const HOTSPOT_PX = 28
+
+/** Truncate a machine name for inline display inside a pastille */
+function truncateName(name: string, max = 8): string {
+  if (!name) return '?'
+  // For convoyeurs, try to extract a short code (e.g. "Convoyeur CV-201" → "CV-201")
+  const cvMatch = name.match(/(?:convoyeur\s*)?([A-Z]{1,3}[-]?\d{1,4}[A-Z]?)/i)
+  if (cvMatch && cvMatch[1].length <= max) return cvMatch[1]
+  // For short names, use as-is
+  if (name.length <= max) return name
+  // Extract first meaningful word/abbreviation
+  const words = name.split(/[\s_\-]+/).filter(Boolean)
+  if (words.length > 1) {
+    // Try acronym: "Poste Arrêt 2" → "PA2"
+    const acronym = words.map(w => w[0]?.toUpperCase()).join('')
+    if (acronym.length >= 2 && acronym.length <= max) return acronym
+    // Return first word truncated
+    return words[0].substring(0, max)
+  }
+  return name.substring(0, max)
+}
 
 // ─── Layout constants for mobile container sizing ─────────────────
 const TOP_HEADER_H = 56   // Layout top header h-14 = 56px
@@ -582,7 +602,7 @@ export default function SchemaInteractif() {
             {/* Types */}
             <div>
               <h3 className="text-gray-400 text-[10px] font-bold uppercase mb-1.5 flex items-center gap-1">
-                <QrCode size={12} /> Types
+                <Layers size={12} /> Types
               </h3>
               <div className="flex flex-wrap gap-1">
                 {Object.entries(TYPE_CONFIG).map(([key, tc]) => (
@@ -710,30 +730,27 @@ export default function SchemaInteractif() {
 
                     {/* Pulsing red ring in heatmap mode for machines with open pannes */}
                     {heatmapMode && heatmapMachineMap.get(m.id)?.panne_count ? (
-                      <div className="absolute inset-0 rounded-full animate-ping bg-red-500 opacity-60"
-                           style={{ width: size + 14, height: size + 14, margin: -(size + 14 - size) / 2 }} />
+                      <div className="absolute rounded-full animate-ping bg-red-500 opacity-60"
+                           style={{ width: 20, height: 20, left: '50%', top: '50%', marginLeft: -10, marginTop: -10 }} />
                     ) : null}
 
-                    {/* Hotspot dot */}
+                    {/* Hotspot pill with machine name */}
                     <div
-                      className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
+                      className="rounded-full border-2 flex items-center justify-center transition-all duration-150 whitespace-nowrap"
                       style={{
-                        width: size,
-                        height: size,
+                        padding: isHovered || isSearch ? '2px 8px' : '1px 6px',
+                        minWidth: 28,
+                        height: isHovered || isSearch ? 28 : 24,
                         borderColor: isHovered ? '#60a5fa' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef4444' : sc,
                         background: (isHovered || isSearch) ? (tc?.color || '#60a5fa') + 'cc' : (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '#ef444488' : sc + '88',
                         boxShadow: (isHovered || isSearch) ? `0 0 12px ${tc?.color || '#60a5fa'}66` :
                                    (heatmapMode && heatmapMachineMap.get(m.id)?.panne_count) ? '0 0 10px rgba(239,68,68,0.5)' : 'none',
                       }}
                     >
-                      {/* Type icon letter */}
-                      <span className="text-white font-bold"
-                            style={{ fontSize: isHovered ? 11 : 9, textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>
-                        {m.type === 'convoyeur' ? 'C' :
-                         m.type === 'broyeur' ? 'B' :
-                         m.type === 'automate' ? 'A' :
-                         m.type === 'deverseur' ? 'D' :
-                         m.type === 'crible' ? 'Cr' : '?'}
+                      {/* Machine name label */}
+                      <span className="text-white font-bold leading-none"
+                            style={{ fontSize: isHovered ? 10 : 8, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                        {truncateName(m.code_interne || m.nom)}
                       </span>
                     </div>
 

@@ -24,7 +24,6 @@ const CalendarMaintenance = lazy(() => import('./pages/CalendarMaintenance'))
 const DashboardSuperviseur = lazy(() => import('./pages/DashboardSuperviseur'))
 const SchemaInteractif = lazy(() => import('./pages/SchemaInteractif'))
 const BaseConnaissances = lazy(() => import('./pages/BaseConnaissances'))
-const QrLookup = lazy(() => import('./pages/QrLookup'))
 const QuickPanne = lazy(() => import('./pages/QuickPanne'))
 
 function PageLoader() {
@@ -65,7 +64,7 @@ function AppRoutes() {
         <Route path="base-connaissances" element={<Suspense fallback={<PageLoader />}><BaseConnaissances /></Suspense>} />
         <Route path="machines" element={<Suspense fallback={<PageLoader />}><Machines /></Suspense>} />
         <Route path="machines/:id" element={<Suspense fallback={<PageLoader />}><MachineDetail /></Suspense>} />
-        <Route path="equipement/:code" element={<Suspense fallback={<PageLoader />}><QrLookup /></Suspense>} />
+
         <Route path="lignes" element={<Suspense fallback={<PageLoader />}><Lignes /></Suspense>} />
         <Route path="lignes/:ligne" element={<Suspense fallback={<PageLoader />}><LigneDetail /></Suspense>} />
         <Route path="pannes" element={<Suspense fallback={<PageLoader />}><Pannes /></Suspense>} />

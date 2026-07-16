@@ -428,6 +428,17 @@ export default function SchemaInteractif() {
   // ─── Create new machine ─────────────────────────────────────
   const handleCreateMachine = useCallback(async () => {
     if (!editForm.nom.trim()) return
+    // Proactive check: code_interne must be unique
+    if (editForm.code_interne.trim()) {
+      const code = editForm.code_interne.trim().toUpperCase()
+      const exists = data.machines.some(
+        m => (m.code_interne || '').toUpperCase() === code
+      )
+      if (exists) {
+        toast.error(`Code interne "${code}" déjà utilisé par un autre équipement`, { duration: 4000 })
+        return
+      }
+    }
     setSaving(true)
     try {
       const payload: Record<string, unknown> = {
@@ -778,8 +789,13 @@ export default function SchemaInteractif() {
               </div>
               <div>
                 <label className="block text-gray-400 text-xs font-medium mb-1">Code interne</label>
+                {showCreateModal && editForm.code_interne.trim() && data.machines.some(m => (m.code_interne || '').toUpperCase() === editForm.code_interne.trim().toUpperCase()) && (
+                  <p className="text-red-400 text-[10px] mb-1 flex items-center gap-1">
+                    <AlertTriangle size={10} /> Ce code interne est déjà utilisé
+                  </p>
+                )}
                 <input type="text" value={editForm.code_interne} onChange={e => setEditForm(f => ({ ...f, code_interne: e.target.value }))}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 uppercase" placeholder="L101" />
+                  className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-white text-sm focus:outline-none uppercase ${showCreateModal && editForm.code_interne.trim() && data.machines.some(m => (m.code_interne || '').toUpperCase() === editForm.code_interne.trim().toUpperCase()) ? 'border-red-500 focus:border-red-500' : 'border-gray-600 focus:border-blue-500'}`} placeholder="L101" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

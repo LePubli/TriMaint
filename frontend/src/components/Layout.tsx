@@ -3,19 +3,23 @@ import { useAuth } from '../context/AuthContext'
 import {
   LayoutDashboard, Wrench, AlertTriangle, ClipboardList,
   Package, Search, LogOut, Users, BarChart2, RefreshCw, Factory,
-  Map, BookOpen, ChevronDown
+  Map, BookOpen, ChevronDown, BarChart3, Zap, Calendar, QrCode
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/schema', label: 'Schéma Interactif', icon: Map },
+  { to: '/quick-panne', label: 'Signaler Panne', icon: Zap },
+  { to: '/equipement', label: 'Scanner QR', icon: QrCode },
+  { to: '/dashboard-superviseur', label: 'Dashboard Superviseur', icon: BarChart3 },
   { to: '/base-connaissances', label: 'Base Connaissances', icon: BookOpen },
   { to: '/lignes', label: 'Lignes & Process', icon: Factory },
   { to: '/machines', label: 'Machines', icon: Wrench },
   { to: '/pannes', label: 'Pannes', icon: AlertTriangle },
   { to: '/interventions', label: 'Bons de Travail', icon: ClipboardList },
   { to: '/pieces', label: 'Pièces', icon: Package },
+  { to: '/maintenance-preventive/calendar', label: 'Calendrier Maint.', icon: Calendar },
   { to: '/maintenance-preventive', label: 'Prévention', icon: RefreshCw },
   { to: '/recherche', label: 'Recherche', icon: Search },
 ]
@@ -75,7 +79,7 @@ export default function Layout() {
           ))}
 
           {/* Section admin */}
-          {user?.role === 'admin' && (
+          {(user?.role === 'admin' || user?.role === 'manager') && (
             <div className="pt-3 mt-3 border-t border-gray-700">
               <p className="px-3 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 Administration

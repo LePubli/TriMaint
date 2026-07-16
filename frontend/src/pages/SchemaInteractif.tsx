@@ -709,6 +709,9 @@ export default function SchemaInteractif() {
                 const baseSize = getSize(m)
                 const isSelected = selectedIds.has(m.id)
                 const size = isHovered || isSearch || isDrag ? baseSize + 8 : baseSize
+                const fontSize = isMobile
+                  ? (isHovered || isDrag ? 7 : 5.5) * (baseSize / MOBILE_HOTSPOT_PX)
+                  : (isHovered || isDrag ? 10 : 7) * (baseSize / HOTSPOT_PX)
 
                 return (
                   <div key={m.id} data-hotspot="true" className="absolute group"
@@ -743,16 +746,20 @@ export default function SchemaInteractif() {
                     )}
                     {isDrag && (<div className="absolute inset-0 rounded-full border-2 border-amber-400" style={{ width: size + 10, height: size + 10, margin: -(size + 10 - size) / 2, boxShadow: '0 0 20px rgba(251,191,36,0.5)' }} />)}
 
-                    <div className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
+                    <div className="rounded-full border-2 flex items-center justify-center transition-all duration-150 whitespace-nowrap"
                       style={{
-                        width: size, height: size,
+                        padding: isHovered || isSearch || isDrag
+                          ? (isMobile ? '1px 5px' : '2px 8px')
+                          : (isMobile ? '1px 4px' : '1px 6px'),
+                        minWidth: isMobile ? MOBILE_HOTSPOT_PX : HOTSPOT_PX,
+                        height: isMobile ? MOBILE_HOTSPOT_PX : (isHovered || isSearch ? HOTSPOT_PX + 4 : HOTSPOT_PX - 4),
                         borderColor: isDrag ? '#fbbf24' : isHovered ? '#60a5fa' : sc,
                         background: isDrag ? '#fbbf24cc' : (isHovered || isSearch) ? (tc?.color || '#60a5fa') + 'cc' : sc + '88',
                         boxShadow: isDrag ? '0 0 16px rgba(251,191,36,0.6)' :
                           (isHovered || isSearch) ? `0 0 12px ${(tc?.color || '#60a5fa')}66` :
                           editMode ? '0 0 6px rgba(251,191,36,0.3)' : 'none',
                       }}>
-                      <span className="text-white font-bold leading-none" style={{ fontSize: (isHovered || isDrag ? 10 : 7) * (baseSize / HOTSPOT_PX), textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                      <span className="text-white font-bold leading-none" style={{ fontSize, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
                         {truncateName(m.code_interne || m.nom)}
                       </span>
                     </div>

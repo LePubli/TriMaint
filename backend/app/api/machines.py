@@ -1,6 +1,3 @@
-import qrcode
-import io
-import base64
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.database import get_db
@@ -12,13 +9,6 @@ from app.core.security import get_current_user, require_manager_or_admin, requir
 from app.core.activity import log_activity
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
-
-
-def generate_qr(data: str) -> str:
-    qr = qrcode.make(data)
-    buf = io.BytesIO()
-    qr.save(buf, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 @router.get("/", response_model=list[MachineOut])
@@ -83,6 +73,8 @@ def get_schema_data(
                 "ligne": m.ligne,
                 "pos_x": m.pos_x,
                 "pos_y": m.pos_y,
+                "couleur": m.couleur,
+                "taille_pastille": m.taille_pastille,
                 "type": "machine",
             }
             for m in machines
@@ -185,24 +177,6 @@ def delete_ligne(
     return {"ok": True, "affected": count}
 
 
-def _ensure_qr(machine: Machine, db: Session):
-    """Generate QR code on-demand if missing."""
-    if not machine.qr_code and machine.code_interne:
-        machine.qr_code = generate_qr(f"trimaint://equipement/{machine.code_interne}")
-        db.commit()
-        db.refresh(machine)
-
-
-@router.get("/lookup/{code}", response_model=MachineOut)
-def lookup_by_code(code: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    """Lookup a machine by its code_interne (used by QR code scanning)."""
-    machine = db.query(Machine).filter(Machine.code_interne == code.upper()).first()
-    if not machine:
-        raise HTTPException(status_code=404, detail="Equipement introuvable")
-    _ensure_qr(machine, db)
-    return machine
-
-
 @router.get("/bulk", response_model=list[MachineOut])
 def bulk_machines(ids: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
     """Fetch multiple machines by comma-separated IDs for schema."""
@@ -215,7 +189,6 @@ def get_machine(machine_id: int, db: Session = Depends(get_db), _=Depends(get_cu
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
     if not machine:
         raise HTTPException(status_code=404, detail="Machine not found")
-    _ensure_qr(machine, db)
     return machine
 
 
@@ -223,8 +196,6 @@ def get_machine(machine_id: int, db: Session = Depends(get_db), _=Depends(get_cu
 def create_machine(machine_in: MachineCreate, db: Session = Depends(get_db), current_user=Depends(require_manager_or_admin)):
     machine = Machine(**machine_in.model_dump())
     db.add(machine)
-    db.flush()
-    machine.qr_code = generate_qr(f"trimaint://machine/{machine.id}")
     db.commit()
     db.refresh(machine)
     log_activity(db, current_user, "créé", "machine", machine.id, machine.nom)

@@ -76,8 +76,22 @@ const PRESET_COLORS = [
   '#ec4899', '#f59e0b', '#14b8a6', '#06b6d4', '#f43f5e', '#84cc16',
 ]
 
-const HOTSPOT_PX = 28
-const MOBILE_HOTSPOT_PX = 18
+// ─── Label size options (em) ────────────────────────────────────────
+const DEFAULT_LABEL_EM = 0.9
+const SIZE_OPTIONS = [
+  { value: '5',  label: 'Très petit', em: 0.5 },
+  { value: '7',  label: 'Petit',      em: 0.7 },
+  { value: '9',  label: 'Normal',     em: 0.9 },
+  { value: '11', label: 'Grand',      em: 1.1 },
+  { value: '14', label: 'Très grand', em: 1.4 },
+] as const
+
+/** Resolve the em font-size for a machine label */
+function getLabelEm(m: SchemaMachine): number {
+  if (!m.taille_pastille) return DEFAULT_LABEL_EM
+  const found = SIZE_OPTIONS.find(s => s.value === String(m.taille_pastille))
+  return found ? found.em : m.taille_pastille / 10
+}
 
 /** Truncate a machine name for inline display inside a pastille */
 function truncateName(name: string, max = 8): string {
@@ -537,8 +551,6 @@ export default function SchemaInteractif() {
 
   // Helper: resolve a machine's display color
   const getColor = (m: SchemaMachine) => m.couleur || STATUT_DOT[m.statut] || '#6b7280'
-  // Helper: resolve a machine's display size
-  const getSize = (m: SchemaMachine) => m.taille_pastille || (isMobile ? MOBILE_HOTSPOT_PX : HOTSPOT_PX)
 
   // ─── Loading ────────────────────────────────────────────────
   if (loading) return (
@@ -700,18 +712,28 @@ export default function SchemaInteractif() {
                 )
               })}
 
-              {/* Machine hotspots */}
+              {/* Machine labels (text-only, em-sized, zoom-adaptive) */}
               {data.machines.map(m => {
                 if (!m.pos_x || !m.pos_y || !visibleIds.has(m.id)) return null
                 const left = toPctX(m.pos_x), top = toPctY(m.pos_y)
                 const isHovered = hoveredId === m.id, isSearch = searchMatch?.id === m.id, isDrag = draggingId === m.id
                 const tc = TYPE_CONFIG[m.type], sc = getColor(m)
-                const baseSize = getSize(m)
                 const isSelected = selectedIds.has(m.id)
-                const size = isHovered || isSearch || isDrag ? baseSize + 8 : baseSize
-                const fontSize = isMobile
-                  ? (isHovered || isDrag ? 7 : 5.5) * (baseSize / MOBILE_HOTSPOT_PX)
-                  : (isHovered || isDrag ? 10 : 7) * (baseSize / HOTSPOT_PX)
+                const labelEm = getLabelEm(m)
+                const hoveredEm = labelEm * 1.2
+
+                // Build text-shadow stack for readability / highlights
+                const baseShadow = '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)'
+                const searchShadow = `0 0 6px rgba(250,204,21,0.9), 0 0 14px rgba(250,204,21,0.5), 0 0 3px rgba(0,0,0,0.9)`
+                const editShadow = '0 0 4px rgba(251,191,36,0.5), 0 0 3px rgba(0,0,0,0.9)'
+                const selectShadow = '0 0 6px rgba(96,165,250,0.8), 0 0 3px rgba(0,0,0,0.9)'
+                const dragShadow = '0 0 10px rgba(251,191,36,0.7), 0 0 3px rgba(0,0,0,0.9)'
+                const heatmapShadow = heatmapMachineMap.get(m.id)?.panne_count
+                  ? '0 0 8px rgba(239,68,68,0.8), 0 0 3px rgba(0,0,0,0.9)' : ''
+                const textShadow = isDrag ? dragShadow
+                  : isSearch ? searchShadow
+                  : isSelected ? selectShadow
+                  : heatmapShadow || (editMode && !isDrag ? editShadow : baseShadow)
 
                 return (
                   <div key={m.id} data-hotspot="true" className="absolute group"
@@ -731,39 +753,32 @@ export default function SchemaInteractif() {
                     onTouchMove={(e) => handleHotspotTouchMove(e)}
                     onTouchEnd={handleHotspotTouchEnd}
                   >
-                    {isSearch && (<div className="absolute inset-0 rounded-full animate-ping bg-yellow-400 opacity-40" style={{ width: size + 12, height: size + 12, margin: -(size + 12 - size) / 2 }} />)}
-                    {heatmapMode && heatmapMachineMap.get(m.id)?.panne_count && (<div className="absolute inset-0 rounded-full animate-ping bg-red-500 opacity-60" style={{ width: size + 14, height: size + 14, margin: -(size + 14 - size) / 2 }} />)}
-                    {editMode && !isDrag && !isSelected && (<div className="absolute inset-0 rounded-full border-2 border-amber-400/50 animate-pulse" style={{ width: size + 6, height: size + 6, margin: -(size + 6 - size) / 2 }} />)}
-                    {isSelected && (
-                      <div className="absolute inset-0 rounded-full border-3 border-blue-400 bg-blue-400/20"
-                        style={{ width: size + 8, height: size + 8, margin: -(size + 8 - size) / 2, boxShadow: '0 0 12px rgba(96,165,250,0.5)' }}>
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="w-4 h-4 rounded-full bg-blue-500 flex items-center justify-center">
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                          </div>
-                        </div>
-                      </div>
+                    {/* Search highlight: pulsing yellow background behind text */}
+                    {isSearch && (
+                      <span className="absolute -inset-x-1 -inset-y-0.5 rounded bg-yellow-400/30 animate-ping" />
                     )}
-                    {isDrag && (<div className="absolute inset-0 rounded-full border-2 border-amber-400" style={{ width: size + 10, height: size + 10, margin: -(size + 10 - size) / 2, boxShadow: '0 0 20px rgba(251,191,36,0.5)' }} />)}
 
-                    <div className="rounded-full border-2 flex items-center justify-center transition-all duration-150 whitespace-nowrap"
-                      style={{
-                        padding: isHovered || isSearch || isDrag
-                          ? (isMobile ? '1px 5px' : '2px 8px')
-                          : (isMobile ? '1px 4px' : '1px 6px'),
-                        minWidth: isMobile ? MOBILE_HOTSPOT_PX : HOTSPOT_PX,
-                        height: isMobile ? MOBILE_HOTSPOT_PX : (isHovered || isSearch ? HOTSPOT_PX + 4 : HOTSPOT_PX - 4),
-                        borderColor: isDrag ? '#fbbf24' : isHovered ? '#60a5fa' : sc,
-                        background: isDrag ? '#fbbf24cc' : (isHovered || isSearch) ? (tc?.color || '#60a5fa') + 'cc' : sc + '88',
-                        boxShadow: isDrag ? '0 0 16px rgba(251,191,36,0.6)' :
-                          (isHovered || isSearch) ? `0 0 12px ${(tc?.color || '#60a5fa')}66` :
-                          editMode ? '0 0 6px rgba(251,191,36,0.3)' : 'none',
-                      }}>
-                      <span className="text-white font-bold leading-none" style={{ fontSize, textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
-                        {truncateName(m.code_interne || m.nom)}
+                    {/* Selection checkmark badge */}
+                    {isSelected && (
+                      <span className="absolute -right-1.5 -top-1.5 w-3.5 h-3.5 rounded-full bg-blue-500 flex items-center justify-center"
+                        style={{ boxShadow: '0 0 6px rgba(96,165,250,0.6)' }}>
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                       </span>
-                    </div>
+                    )}
 
+                    {/* The label itself — colored text, em-sized */}
+                    <span
+                      className="font-bold whitespace-nowrap transition-all duration-150 select-none"
+                      style={{
+                        fontSize: isHovered || isDrag ? `${hoveredEm}em` : `${labelEm}em`,
+                        color: isDrag ? '#fbbf24' : isHovered ? '#60a5fa' : sc,
+                        textShadow,
+                        letterSpacing: '0.02em',
+                      }}>
+                      {truncateName(m.code_interne || m.nom)}
+                    </span>
+
+                    {/* Desktop tooltip on hover */}
                     {!isMobile && isHovered && !editMode && (
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-900/95 border border-gray-600 rounded-lg px-3 py-2 whitespace-nowrap z-50 shadow-xl pointer-events-none">
                         <div className="text-white font-bold text-sm">{m.code_interne || m.nom}</div>
@@ -890,25 +905,24 @@ export default function SchemaInteractif() {
                   </div>
                   {/* Size */}
                   <div>
-                    <label className="block text-gray-500 text-[10px] mb-1.5">Taille (px): {editForm.taille_pastille || 'défaut (28)'}</label>
-                    <input type="range" min="12" max="60" step="2"
-                      value={editForm.taille_pastille || 28}
-                      onChange={e => setEditForm(f => ({ ...f, taille_pastille: e.target.value === '28' ? '' : e.target.value }))}
-                      className="w-full accent-amber-400" />
-                    <div className="flex justify-between text-[9px] text-gray-600">
-                      <span>12px</span><span>60px</span>
-                    </div>
+                    <label className="block text-gray-500 text-[10px] mb-1.5">Taille du texte</label>
+                    <select value={editForm.taille_pastille || '9'}
+                      onChange={e => setEditForm(f => ({ ...f, taille_pastille: e.target.value === '9' ? '' : e.target.value }))}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                      {SIZE_OPTIONS.map(s => (
+                        <option key={s.value} value={s.value}>{s.label} ({s.em}em)</option>
+                      ))}
+                    </select>
                     {/* Live preview */}
-                    <div className="flex items-center justify-center mt-2 h-16 bg-gray-800/50 rounded-lg">
-                      <div className="rounded-full border-2 flex items-center justify-center"
+                    <div className="flex items-center justify-center mt-2 h-12 bg-gray-800/50 rounded-lg">
+                      <span className="font-bold"
                         style={{
-                          width: parseInt(editForm.taille_pastille || '28'),
-                          height: parseInt(editForm.taille_pastille || '28'),
-                          borderColor: editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280',
-                          background: (editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280') + '88',
+                          fontSize: `${SIZE_OPTIONS.find(s => s.value === (editForm.taille_pastille || '9'))?.em || 0.9}em`,
+                          color: editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280',
+                          textShadow: '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)',
                         }}>
-                        <span className="text-white font-bold" style={{ fontSize: 9 * (parseInt(editForm.taille_pastille || '28') / 28), textShadow: '0 1px 2px rgba(0,0,0,0.5)' }}>?</span>
-                      </div>
+                        CV-201
+                      </span>
                     </div>
                   </div>
                 </div>

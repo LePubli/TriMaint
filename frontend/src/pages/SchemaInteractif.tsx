@@ -76,22 +76,18 @@ const PRESET_COLORS = [
   '#ec4899', '#f59e0b', '#14b8a6', '#06b6d4', '#f43f5e', '#84cc16',
 ]
 
-// ─── Label size options (em) ────────────────────────────────────────
+// ─── Label size (em) ──────────────────────────────────────────────
 const DEFAULT_LABEL_EM = 0.9
 const MOBILE_EM_FACTOR = 0.65  // scale down labels on small screens
-const SIZE_OPTIONS = [
-  { value: '5',  label: 'Très petit', em: 0.5 },
-  { value: '7',  label: 'Petit',      em: 0.7 },
-  { value: '9',  label: 'Normal',     em: 0.9 },
-  { value: '11', label: 'Grand',      em: 1.1 },
-  { value: '14', label: 'Très grand', em: 1.4 },
-] as const
-
+// taille_pastille now stores the raw em value (e.g. 0.9 → stored as 0.9)
+// Legacy integer values (5,7,9,11,14) are auto-converted: value / 10
 /** Resolve the em font-size for a machine label */
 function getLabelEm(m: SchemaMachine): number {
   if (!m.taille_pastille) return DEFAULT_LABEL_EM
-  const found = SIZE_OPTIONS.find(s => s.value === String(m.taille_pastille))
-  return found ? found.em : m.taille_pastille / 10
+  const v = m.taille_pastille
+  // Legacy: old integer values < 20 were on a 0-14 scale → divide by 10
+  if (Number.isInteger(v) && v > 0 && v < 20) return v / 10
+  return v
 }
 
 /** Truncate a machine name for inline display inside a pastille */
@@ -421,6 +417,21 @@ export default function SchemaInteractif() {
     catch { toast.error('Erreur sauvegarde position') }
   }, [])
 
+  // ─── Rotation (stored in localStorage, keyed by machine id) ───
+  const [rotationMap, setRotationMap] = useState<Record<number, number>>(() => {
+    try {
+      const raw = localStorage.getItem('trimaint_label_rotations')
+      return raw ? JSON.parse(raw) : {}
+    } catch { return {} }
+  })
+  const saveRotation = useCallback((id: number, deg: number) => {
+    setRotationMap(prev => {
+      const next = { ...prev, [id]: deg }
+      try { localStorage.setItem('trimaint_label_rotations', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
   // ─── Open edit modal ────────────────────────────────────────
   const openEditModal = useCallback((m: SchemaMachine) => {
     setEditingMachine(m)
@@ -429,7 +440,10 @@ export default function SchemaInteractif() {
       etage: String(m.etage ?? 0), ligne: m.ligne || '', type: m.type || 'equipement',
       statut: m.statut || 'operationnel', notes: '',
       pos_x: m.pos_x ? String(m.pos_x) : '', pos_y: m.pos_y ? String(m.pos_y) : '',
-      couleur: m.couleur || '', taille_pastille: m.taille_pastille ? String(m.taille_pastille) : '',
+      couleur: m.couleur || '',
+      taille_pastille: m.taille_pastille
+        ? String(Number.isInteger(m.taille_pastille) && m.taille_pastille > 0 && m.taille_pastille < 20 ? m.taille_pastille / 10 : m.taille_pastille)
+        : '',
       rotation: String(rotationMap[m.id] ?? 0),
     })
     setShowEditModal(true)
@@ -447,7 +461,7 @@ export default function SchemaInteractif() {
         pos_x: editForm.pos_x ? parseFloat(editForm.pos_x) : null,
         pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
         couleur: editForm.couleur || null,
-        taille_pastille: editForm.taille_pastille ? parseInt(editForm.taille_pastille) : null,
+        taille_pastille: editForm.taille_pastille ? parseFloat(editForm.taille_pastille) : null,
       }
       if (editForm.notes.trim()) payload.notes = editForm.notes
       await api.put(`/machines/${editingMachine.id}`, payload)
@@ -481,7 +495,7 @@ export default function SchemaInteractif() {
         pos_x: editForm.pos_x ? parseFloat(editForm.pos_x) : null,
         pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
         couleur: editForm.couleur || null,
-        taille_pastille: editForm.taille_pastille ? parseInt(editForm.taille_pastille) : null,
+        taille_pastille: editForm.taille_pastille ? parseFloat(editForm.taille_pastille) : null,
       }
       await api.post('/machines/', payload)
       // Save rotation to localStorage (response contains the new machine with id)
@@ -555,21 +569,6 @@ export default function SchemaInteractif() {
 
   // Helper: resolve a machine's display color
   const getColor = (m: SchemaMachine) => m.couleur || STATUT_DOT[m.statut] || '#6b7280'
-
-  // ─── Rotation (stored in localStorage, keyed by machine id) ───
-  const [rotationMap, setRotationMap] = useState<Record<number, number>>(() => {
-    try {
-      const raw = localStorage.getItem('trimaint_label_rotations')
-      return raw ? JSON.parse(raw) : {}
-    } catch { return {} }
-  })
-  const saveRotation = useCallback((id: number, deg: number) => {
-    setRotationMap(prev => {
-      const next = { ...prev, [id]: deg }
-      try { localStorage.setItem('trimaint_label_rotations', JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
 
   // ─── Loading ────────────────────────────────────────────────
   if (loading) return (
@@ -928,13 +927,30 @@ export default function SchemaInteractif() {
                   {/* Size */}
                   <div>
                     <label className="block text-gray-500 text-[10px] mb-1.5">Taille du texte</label>
-                    <select value={editForm.taille_pastille || '9'}
-                      onChange={e => setEditForm(f => ({ ...f, taille_pastille: e.target.value === '9' ? '' : e.target.value }))}
-                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
-                      {SIZE_OPTIONS.map(s => (
-                        <option key={s.value} value={s.value}>{s.label} ({s.em}em)</option>
+                    <div className="flex items-center gap-2">
+                      <input type="number" min="0.3" max="5" step="0.1"
+                        value={editForm.taille_pastille || DEFAULT_LABEL_EM}
+                        onChange={e => {
+                          const val = Math.max(0.3, Math.min(5, parseFloat(e.target.value) || DEFAULT_LABEL_EM))
+                          setEditForm(f => ({ ...f, taille_pastille: String(val) }))
+                        }}
+                        className="w-20 px-2 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm text-center focus:outline-none focus:border-blue-500" />
+                      <span className="text-gray-400 text-sm">em</span>
+                      <span className="text-gray-600 text-xs">(0.3 – 5.0)</span>
+                      {editForm.taille_pastille && Number(editForm.taille_pastille) !== DEFAULT_LABEL_EM && (
+                        <button onClick={() => setEditForm(f => ({ ...f, taille_pastille: '' }))}
+                          className="text-gray-500 text-[10px] hover:text-gray-300 underline">Réinitialiser</button>
+                      )}
+                    </div>
+                    {/* Quick presets for convenience */}
+                    <div className="flex gap-1.5 mt-1.5">
+                      {[0.5, 0.7, 0.9, 1.1, 1.4, 1.8, 2.2].map(v => (
+                        <button key={v} onClick={() => setEditForm(f => ({ ...f, taille_pastille: String(v) }))}
+                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${Number(editForm.taille_pastille || DEFAULT_LABEL_EM) === v ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>
+                          {v}
+                        </button>
                       ))}
-                    </select>
+                    </div>
                   </div>
                 </div>
                 {/* Rotation */}
@@ -960,7 +976,7 @@ export default function SchemaInteractif() {
                   <div className="flex items-center justify-center mt-2 h-16 bg-gray-800/50 rounded-lg">
                     <span className="font-bold"
                       style={{
-                        fontSize: `${SIZE_OPTIONS.find(s => s.value === (editForm.taille_pastille || '9'))?.em || 0.9}em`,
+                        fontSize: `${editForm.taille_pastille || DEFAULT_LABEL_EM}em`,
                         color: editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280',
                         textShadow: '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)',
                         transform: `rotate(${editForm.rotation || '0'}deg)`,

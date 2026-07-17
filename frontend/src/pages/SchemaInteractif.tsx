@@ -20,6 +20,7 @@ interface SchemaMachine {
   zone: string | null; etage: number | null; ligne: string | null
   pos_x: number | null; pos_y: number | null; type: string
   modele?: string | null; couleur?: string | null; taille_pastille?: number | null
+  rotation?: number | null
 }
 interface SchemaData {
   machines: SchemaMachine[]; zones: string[]; etages: number[]; lignes: string[]
@@ -78,6 +79,7 @@ const PRESET_COLORS = [
 
 // ─── Label size options (em) ────────────────────────────────────────
 const DEFAULT_LABEL_EM = 0.9
+const MOBILE_EM_FACTOR = 0.65  // scale down labels on small screens
 const SIZE_OPTIONS = [
   { value: '5',  label: 'Très petit', em: 0.5 },
   { value: '7',  label: 'Petit',      em: 0.7 },
@@ -112,13 +114,13 @@ function truncateName(name: string, max = 8): string {
 interface EditForm {
   nom: string; code_interne: string; zone: string; etage: string
   ligne: string; type: string; statut: string; notes: string
-  pos_x: string; pos_y: string; couleur: string; taille_pastille: string
+  pos_x: string; pos_y: string; couleur: string; taille_pastille: string; rotation: string
 }
 
 const emptyForm = (): EditForm => ({
   nom: '', code_interne: '', zone: '', etage: '0', ligne: '',
   type: 'equipement', statut: 'operationnel', notes: '',
-  pos_x: '', pos_y: '', couleur: '', taille_pastille: '',
+  pos_x: '', pos_y: '', couleur: '', taille_pastille: '', rotation: '0',
 })
 
 // ═══════════════════════════════════════════════════════════════════
@@ -429,6 +431,7 @@ export default function SchemaInteractif() {
       statut: m.statut || 'operationnel', notes: '',
       pos_x: m.pos_x ? String(m.pos_x) : '', pos_y: m.pos_y ? String(m.pos_y) : '',
       couleur: m.couleur || '', taille_pastille: m.taille_pastille ? String(m.taille_pastille) : '',
+      rotation: m.rotation != null ? String(m.rotation) : '0',
     })
     setShowEditModal(true)
   }, [])
@@ -446,6 +449,7 @@ export default function SchemaInteractif() {
         pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
         couleur: editForm.couleur || null,
         taille_pastille: editForm.taille_pastille ? parseInt(editForm.taille_pastille) : null,
+        rotation: editForm.rotation ? parseFloat(editForm.rotation) : null,
       }
       if (editForm.notes.trim()) payload.notes = editForm.notes
       await api.put(`/machines/${editingMachine.id}`, payload)
@@ -479,6 +483,7 @@ export default function SchemaInteractif() {
         pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
         couleur: editForm.couleur || null,
         taille_pastille: editForm.taille_pastille ? parseInt(editForm.taille_pastille) : null,
+        rotation: editForm.rotation ? parseFloat(editForm.rotation) : null,
       }
       await api.post('/machines/', payload)
       toast.success(`${editForm.nom} créé`, { duration: 3000 })
@@ -719,8 +724,9 @@ export default function SchemaInteractif() {
                 const isHovered = hoveredId === m.id, isSearch = searchMatch?.id === m.id, isDrag = draggingId === m.id
                 const tc = TYPE_CONFIG[m.type], sc = getColor(m)
                 const isSelected = selectedIds.has(m.id)
-                const labelEm = getLabelEm(m)
+                const labelEm = getLabelEm(m) * (isMobile ? MOBILE_EM_FACTOR : 1)
                 const hoveredEm = labelEm * 1.2
+                const rotation = m.rotation ?? 0
 
                 // Build text-shadow stack for readability / highlights
                 const baseShadow = '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)'
@@ -766,7 +772,7 @@ export default function SchemaInteractif() {
                       </span>
                     )}
 
-                    {/* The label itself — colored text, em-sized */}
+                    {/* The label itself — colored text, em-sized, rotatable */}
                     <span
                       className="font-bold whitespace-nowrap transition-all duration-150 select-none"
                       style={{
@@ -774,6 +780,8 @@ export default function SchemaInteractif() {
                         color: isDrag ? '#fbbf24' : isHovered ? '#60a5fa' : sc,
                         textShadow,
                         letterSpacing: '0.02em',
+                        transform: `rotate(${rotation}deg)`,
+                        transformOrigin: 'center center',
                       }}>
                       {truncateName(m.code_interne || m.nom)}
                     </span>
@@ -879,9 +887,9 @@ export default function SchemaInteractif() {
                   className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 resize-none" placeholder="Notes optionnelles..." />
               </div>
 
-              {/* ─── Appearance: Color + Size ──────────────────── */}
+              {/* ─── Appearance: Color + Size + Rotation ──────────── */}
               <div className="bg-gray-700/30 rounded-lg p-3">
-                <label className="block text-gray-400 text-xs font-medium mb-3 flex items-center gap-1.5"><Palette size={12} /> Apparence de la pastille</label>
+                <label className="block text-gray-400 text-xs font-medium mb-3 flex items-center gap-1.5"><Palette size={12} /> Apparence de l'étiquette</label>
                 <div className="grid grid-cols-2 gap-4">
                   {/* Color */}
                   <div>
@@ -913,17 +921,38 @@ export default function SchemaInteractif() {
                         <option key={s.value} value={s.value}>{s.label} ({s.em}em)</option>
                       ))}
                     </select>
-                    {/* Live preview */}
-                    <div className="flex items-center justify-center mt-2 h-12 bg-gray-800/50 rounded-lg">
-                      <span className="font-bold"
-                        style={{
-                          fontSize: `${SIZE_OPTIONS.find(s => s.value === (editForm.taille_pastille || '9'))?.em || 0.9}em`,
-                          color: editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280',
-                          textShadow: '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)',
-                        }}>
-                        CV-201
-                      </span>
-                    </div>
+                  </div>
+                </div>
+                {/* Rotation */}
+                <div className="mt-3">
+                  <label className="block text-gray-500 text-[10px] mb-1.5">
+                    Orientation : {editForm.rotation || '0'}°
+                    {Number(editForm.rotation || 0) !== 0 && (
+                      <button onClick={() => setEditForm(f => ({ ...f, rotation: '0' }))}
+                        className="ml-2 text-gray-500 hover:text-gray-300 underline">Réinitialiser</button>
+                    )}
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input type="range" min="0" max="360" step="5"
+                      value={editForm.rotation || '0'}
+                      onChange={e => setEditForm(f => ({ ...f, rotation: e.target.value }))}
+                      className="flex-1 accent-amber-400" />
+                    <input type="number" min="0" max="360" step="5"
+                      value={editForm.rotation || '0'}
+                      onChange={e => setEditForm(f => ({ ...f, rotation: Math.max(0, Math.min(360, Number(e.target.value) || 0)).toString() }))}
+                      className="w-16 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-white text-xs text-center focus:outline-none focus:border-blue-500" />
+                  </div>
+                  {/* Live preview */}
+                  <div className="flex items-center justify-center mt-2 h-16 bg-gray-800/50 rounded-lg">
+                    <span className="font-bold"
+                      style={{
+                        fontSize: `${SIZE_OPTIONS.find(s => s.value === (editForm.taille_pastille || '9'))?.em || 0.9}em`,
+                        color: editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280',
+                        textShadow: '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)',
+                        transform: `rotate(${editForm.rotation || '0'}deg)`,
+                      }}>
+                      CV-201
+                    </span>
                   </div>
                 </div>
               </div>

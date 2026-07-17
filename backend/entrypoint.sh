@@ -45,6 +45,21 @@ cur.close()
 conn.close()
 " 2>/dev/null || true
 
+# Ajouter la colonne rotation si elle n'existe pas (évite un fichier de migration)
+python -c "
+import psycopg2, os
+conn = psycopg2.connect(os.environ['DATABASE_URL'])
+conn.autocommit = True
+cur = conn.cursor()
+cur.execute(\"SELECT column_name FROM information_schema.columns WHERE table_name='machines' AND column_name='rotation'\")
+if not cur.fetchone():
+    cur.execute('ALTER TABLE machines ADD COLUMN rotation FLOAT')
+    print('Colonne rotation ajoutée à machines.')
+else:
+    print('Colonne rotation déjà présente.')
+cur.close(); conn.close()
+"
+
 echo "Exécution des migrations Alembic..."
 alembic upgrade head
 echo "Migrations terminées."

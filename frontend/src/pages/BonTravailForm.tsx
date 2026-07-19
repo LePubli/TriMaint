@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 import toast from 'react-hot-toast'
-import { ArrowLeft, Plus, Trash2, Save, Machine } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Save, Cog } from 'lucide-react'
 
 interface GammeInput {
   ordre: number; code_gamme: string; famille_gamme: string
@@ -107,7 +107,7 @@ export default function BonTravailForm() {
           <div>
             <label className="block text-gray-400 text-xs mb-1.5">Machine</label>
             <div className="relative">
-              <Machine size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <Cog size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <select value={machineId} onChange={e => setMachineId(e.target.value)}
                 className="w-full pl-9 pr-3 py-2.5 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
                 <option value="">— Aucune —</option>

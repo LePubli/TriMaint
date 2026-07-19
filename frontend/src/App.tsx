@@ -25,6 +25,10 @@ const DashboardSuperviseur = lazy(() => import('./pages/DashboardSuperviseur'))
 const SchemaInteractif = lazy(() => import('./pages/SchemaInteractif'))
 const BaseConnaissances = lazy(() => import('./pages/BaseConnaissances'))
 const QuickPanne = lazy(() => import('./pages/QuickPanne'))
+const Entretien = lazy(() => import('./pages/Entretien'))
+const Nettoyage = lazy(() => import('./pages/Nettoyage'))
+const BonTravailDetail = lazy(() => import('./pages/BonTravailDetail'))
+const BonTravailForm = lazy(() => import('./pages/BonTravailForm'))
 
 function PageLoader() {
   return (
@@ -77,6 +81,10 @@ function AppRoutes() {
         <Route path="pieces" element={<Suspense fallback={<PageLoader />}><Pieces /></Suspense>} />
         <Route path="recherche" element={<Suspense fallback={<PageLoader />}><Recherche /></Suspense>} />
         <Route path="quick-panne" element={<Suspense fallback={<PageLoader />}><QuickPanne /></Suspense>} />
+        <Route path="entretien" element={<Suspense fallback={<PageLoader />}><Entretien /></Suspense>} />
+        <Route path="nettoyage" element={<Suspense fallback={<PageLoader />}><Nettoyage /></Suspense>} />
+        <Route path="bons-travail/new" element={<Suspense fallback={<PageLoader />}><BonTravailForm /></Suspense>} />
+        <Route path="bons-travail/:id" element={<Suspense fallback={<PageLoader />}><BonTravailDetail /></Suspense>} />
         <Route path="utilisateurs" element={<AdminRoute><Suspense fallback={<PageLoader />}><Utilisateurs /></Suspense></AdminRoute>} />
         <Route path="activite" element={<AdminRoute><Suspense fallback={<PageLoader />}><Activite /></Suspense></AdminRoute>} />
       </Route>

@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Wrench, AlertTriangle, ClipboardList,
   Package, Search, LogOut, Users, BarChart2, RefreshCw, Factory,
   Map, BookOpen, ChevronDown, MoreHorizontal, Menu,
-  Calendar, X, Shield
+  Calendar, X, Shield, Settings2, SprayCan
 } from 'lucide-react'
 import NotificationBell from './NotificationBell'
 
@@ -16,12 +16,11 @@ const navItems = [
   { to: '/lignes', label: 'Lignes & Process', icon: Factory },
   { to: '/machines', label: 'Machines', icon: Wrench },
   { to: '/pannes', label: 'Pannes', icon: AlertTriangle },
-  { to: '/quick-panne', label: 'Signaler Panne', icon: AlertTriangle },
+  { to: '/entretien', label: 'Entretien', icon: Settings2 },
+  { to: '/nettoyage', label: 'Nettoyage', icon: SprayCan },
   { to: '/interventions', label: 'Bons de Travail', icon: ClipboardList },
   { to: '/pieces', label: 'Pièces', icon: Package },
   { to: '/maintenance-preventive', label: 'Prévention', icon: RefreshCw },
-  { to: '/maintenance-preventive/calendar', label: 'Calendrier', icon: Calendar },
-  { to: '/dashboard-superviseur', label: 'Dashboard Superviseur', icon: BarChart2 },
   { to: '/recherche', label: 'Recherche', icon: Search },
 ]
 
@@ -51,6 +50,8 @@ const moreMenuItems = [
   { to: '/base-connaissances', label: 'Base Connaissances', icon: BookOpen },
   { to: '/lignes', label: 'Lignes & Process', icon: Factory },
   { to: '/machines', label: 'Machines', icon: Wrench },
+  { to: '/entretien', label: 'Entretien', icon: Settings2 },
+  { to: '/nettoyage', label: 'Nettoyage', icon: SprayCan },
   { to: '/interventions', label: 'Bons de Travail', icon: ClipboardList },
   { to: '/pieces', label: 'Pièces', icon: Package },
   { to: '/maintenance-preventive', label: 'Prévention', icon: RefreshCw },

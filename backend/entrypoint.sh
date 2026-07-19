@@ -45,7 +45,7 @@ cur.close()
 conn.close()
 " 2>/dev/null || true
 
-# Ajouter la colonne rotation si elle n'existe pas (évite un fichier de migration)
+# Ajout idempotent de la colonne rotation (supprimée de la migration 0008)
 python -c "
 import psycopg2, os
 conn = psycopg2.connect(os.environ['DATABASE_URL'])

@@ -9,7 +9,7 @@ from slowapi.util import get_remote_address
 from app.api import (
     auth, machines, pannes, interventions, pieces,
     search, stats, uploads, admin, notifications, maintenance_preventive,
-    convoyeurs, base_connaissances, kpi, checklists,
+    convoyeurs, base_connaissances, kpi, checklists, bons_travail,
 )
 from app.core.config import ALLOWED_ORIGINS, BOOTSTRAP_ADMIN, BOOTSTRAP_ADMIN_PASSWORD
 
@@ -97,6 +97,7 @@ app.include_router(convoyeurs.router)
 app.include_router(base_connaissances.router)
 app.include_router(kpi.router)
 app.include_router(checklists.router)
+app.include_router(bons_travail.router)
 
 
 @app.get("/api/health", tags=["health"])

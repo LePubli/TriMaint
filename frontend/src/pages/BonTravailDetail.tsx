@@ -324,8 +324,8 @@ export default function BonTravailDetail() {
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    {g.consignation && <Lock size={12} className="text-orange-500" title="Consignation" />}
-                    {g.condamnation && <Shield size={12} className="text-red-500" title="Condamnation" />}
+                    {g.consignation && <Lock size={12} className="text-orange-500" />}
+                    {g.condamnation && <Shield size={12} className="text-red-500" />}
                     {g.code_gamme && <span className="text-[10px] font-mono px-1.5 py-0.5 bg-gray-700 rounded text-gray-300">{g.code_gamme}</span>}
                     {g.famille_gamme && <span className="text-[10px] text-gray-500">{g.famille_gamme}</span>}
                     <span className="text-xs text-gray-500">#{g.ordre}</span>

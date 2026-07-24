@@ -3,6 +3,25 @@
 Tous les changements notables du projet RefMaint/TriMaint sont documentés ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/).
 
+## [1.3.2] - 2026-07-24
+
+### Corrigé
+- **Pastilles créées invisibles sur le schéma** : `handleCreateMachine`
+  (`frontend/src/pages/SchemaInteractif.tsx`) ne rappelait pas `fetchData()`
+  après `POST /api/machines/`. La machine était bien créée en DB (visible dans
+  la liste `/machines`) mais l'état local `data.machines` du composant schéma
+  n'était jamais rafraîchi — la pastille n'apparaissait qu'après F5.
+  Ajout de `fetchData()` + reset du formulaire après création.
+
+### Changement
+- **Remplacement de l'image de fond du schéma** : `public/process2.jpg`
+  remplacé par un scan A3 paysage issu du PDF fourni par l'utilisateur
+  (`Scan_Copieur_Lil_20260719101529.pdf`). Conversion via
+  `scripts/convert_schema_pdf.py` (pdftoppm @ 200 DPI → Pillow → JPEG q85).
+  Résolution finale : 3307×2338 (vs 4000×2400 précédemment). Le ratio √2 A3
+  paysage correspond au ratio du système de coordonnées MAP (152/107 ≈ 1.42),
+  les pastilles existantes restent donc positionnées correctement.
+
 ## [1.3.1] - 2026-07-24
 
 ### Corrigé

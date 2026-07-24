@@ -501,6 +501,8 @@ export default function SchemaInteractif() {
       // Save rotation to localStorage (response contains the new machine with id)
       toast.success(`${editForm.nom} créé`, { duration: 3000 })
       setShowCreateModal(false)
+      setEditForm(emptyForm())
+      fetchData()
     } catch (err: any) {
       const msg = err?.response?.data?.detail || ''
       if (msg.includes('unique') || msg.includes('duplicate') || msg.includes('code_interne'))

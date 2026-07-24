@@ -68,6 +68,23 @@ class BonTravail(Base):
     compteurs = relationship("BTCompteur", back_populates="bon_travail", cascade="all, delete-orphan")
     visas = relationship("BTVisa", back_populates="bon_travail", cascade="all, delete-orphan")
 
+    # Relations FK vers Machine / User (lazy='joined' évite les N+1 sur la liste)
+    machine = relationship(
+        "Machine",
+        foreign_keys=[machine_id],
+        lazy="joined",
+    )
+    demandeur = relationship(
+        "User",
+        foreign_keys=[demandeur_id],
+        lazy="joined",
+    )
+    intervenant = relationship(
+        "User",
+        foreign_keys=[intervenant_id],
+        lazy="joined",
+    )
+
 
 class BTGamme(Base):
     __tablename__ = "bt_gammes"

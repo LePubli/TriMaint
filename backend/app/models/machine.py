@@ -22,7 +22,7 @@ class Machine(Base):
     pos_x = Column(Float, nullable=True)
     pos_y = Column(Float, nullable=True)
     couleur = Column(String(7), nullable=True)  # hex color e.g. #22c55e
-    taille_pastille = Column(Integer, nullable=True)  # em*10 (5=0.5em, 9=0.9em, 14=1.4em)
+    taille_pastille = Column(Float, nullable=True)  # raw em value (e.g. 0.9, 1.4)
     rotation = Column(Float, nullable=True)  # degrees 0-360 for label orientation
     heures_fonctionnement = Column(Float, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

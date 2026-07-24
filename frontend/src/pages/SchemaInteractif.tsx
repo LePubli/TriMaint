@@ -491,7 +491,7 @@ export default function SchemaInteractif() {
       const payload: Record<string, unknown> = {
         nom: editForm.nom, code_interne: editForm.code_interne || null,
         zone: editForm.zone || null, etage: parseInt(editForm.etage) || 0,
-        ligne: editForm.ligne || null, type: editForm.type, statut: editForm.statut,
+        ligne: editForm.ligne || null, statut: editForm.statut,
         pos_x: editForm.pos_x ? parseFloat(editForm.pos_x) : null,
         pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
         couleur: editForm.couleur || null,

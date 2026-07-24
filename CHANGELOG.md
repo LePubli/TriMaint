@@ -3,6 +3,27 @@
 Tous les changements notables du projet RefMaint/TriMaint sont documentés ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/).
 
+## [1.3.1] - 2026-07-24
+
+### Corrigé
+- **500 sur `GET /api/bons-travail/?type_bt=nettoyage`** : le modèle `BonTravail`
+  ne déclarait pas les relations `machine`, `demandeur`, `intervenant`, alors que
+  `list_bons_travail` les utilise via `joinedload()` et que `_bt_to_list_item`
+  y accède (`bt.demandeur.username`, `bt.machine.nom`, …). Ajout des trois
+  relations avec `lazy="joined"` et `foreign_keys=[...]` (nécessaire car deux
+  FK pointent vers `users`).
+- **422 sur `POST /api/machines/`** : le frontend `SchemaInteractif.tsx` envoie
+  `taille_pastille` en em brut (float, ex. 0.9, 1.4) mais le schéma Pydantic
+  `MachineCreate` le déclarait en `Optional[int]`. En mode lax de Pydantic v2,
+  les floats à virgule sont rejetés sur un champ `int` → 422. Le champ passe à
+  `Optional[float]` côté schéma ET modèle.
+- **Frontend** : suppression du champ `type` (non présent dans `MachineCreate`)
+  du payload envoyé par `handleCreateMachine` (POST `/machines/`).
+- **Migration** : `migration_v24_taille_pastille_float.sql` + Alembic
+  `0011_taille_pastille_float.py` convertissent la colonne `INTEGER` en
+  `DOUBLE PRECISION` et divisent par 10 les anciennes valeurs `em*10` (entiers
+  dans [1, 19]) pour préserver l'affichage existant.
+
 ## [1.1.0] - 2026-07-13
 
 ### Sécurité (Critique)

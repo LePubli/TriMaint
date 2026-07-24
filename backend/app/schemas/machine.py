@@ -17,7 +17,7 @@ class MachineBase(BaseModel):
     pos_x: Optional[float] = None
     pos_y: Optional[float] = None
     couleur: Optional[str] = None
-    taille_pastille: Optional[int] = None
+    taille_pastille: Optional[float] = None
     rotation: Optional[float] = None
 
 

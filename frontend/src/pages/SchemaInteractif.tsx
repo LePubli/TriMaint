@@ -6,7 +6,8 @@ import toast from 'react-hot-toast'
 import {
   ZoomIn, ZoomOut, Maximize2, ArrowLeft,
   Search, X, Filter, MapPin, Layers, AlertTriangle,
-  Thermometer, Pencil, Save, GripVertical, Trash2, Plus, Palette, CheckSquare, Square
+  Thermometer, Pencil, Save, GripVertical, Trash2, Plus, Palette, CheckSquare, Square,
+  MoreHorizontal, ChevronRight
 } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -155,6 +156,8 @@ export default function SchemaInteractif() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createPos, setCreatePos] = useState({ pctX: 0, pctY: 0 })
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [showOverflow, setShowOverflow] = useState(false)  // mobile "..." overflow menu
+  const [showLegend, setShowLegend] = useState(false)  // mobile legend (collapsible)
 
   // Drag
   const [draggingId, setDraggingId] = useState<number | null>(null)
@@ -575,7 +578,7 @@ export default function SchemaInteractif() {
   //  RENDER
   // ═══════════════════════════════════════════════════════════
   return (
-    <div className="h-dvh flex flex-col bg-gray-900 overflow-hidden">
+    <div className={`flex flex-col bg-gray-900 overflow-hidden ${isMobile ? 'h-[calc(100dvh-3.5rem-4rem)]' : 'h-dvh'}`}>
 
       {/* ─── Top Bar ──────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0 z-30">
@@ -586,7 +589,7 @@ export default function SchemaInteractif() {
           <h1 className="text-white font-semibold text-base truncate">
             {isMobile ? 'Schéma Process' : 'Schéma de Process — Trisélec'}
           </h1>
-          <span className="text-gray-500 text-xs shrink-0 hidden sm:inline">{filteredMachines.length}/{data.machines.length}</span>
+          {!isMobile && <span className="text-gray-500 text-xs shrink-0 hidden sm:inline">{filteredMachines.length}/{data.machines.length}</span>}
           {editMode && (
             <span className="text-amber-400 text-[10px] font-bold uppercase tracking-wider bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/30">
               Mode Édition
@@ -596,31 +599,40 @@ export default function SchemaInteractif() {
         <div className="flex items-center gap-1 shrink-0">
           {isManager && (
             <button onClick={toggleEditMode}
-              className={`p-1.5 rounded-lg hover:bg-gray-700 transition-colors ${editMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-300'}`}
+              className={`p-2 rounded-lg hover:bg-gray-700 transition-colors ${editMode ? 'text-amber-400 bg-amber-400/10' : 'text-gray-300'}`}
               title={editMode ? 'Quitter le mode édition' : 'Mode édition'}>
               {editMode ? <Save size={18} /> : <Pencil size={18} />}
             </button>
           )}
-          {editMode && (
+          {editMode && !isMobile && (
             <button onClick={() => { setMultiSelectMode(!multiSelectMode); if (multiSelectMode) setSelectedIds(new Set()) }}
-              className={`p-1.5 rounded-lg hover:bg-gray-700 transition-colors ${multiSelectMode ? 'text-blue-400 bg-blue-400/10' : 'text-gray-300'}`}
+              className={`p-2 rounded-lg hover:bg-gray-700 transition-colors ${multiSelectMode ? 'text-blue-400 bg-blue-400/10' : 'text-gray-300'}`}
               title={multiSelectMode ? 'Quitter la sélection multiple' : 'Sélection multiple'}>
               {multiSelectMode ? <CheckSquare size={18} /> : <Square size={18} />}
             </button>
           )}
-          <button onClick={() => setShowSearch(!showSearch)} className={`p-1.5 rounded-lg hover:bg-gray-700 ${showSearch ? 'text-blue-400' : 'text-gray-300'}`}>
+          <button onClick={() => setShowSearch(!showSearch)} className={`p-2 rounded-lg hover:bg-gray-700 ${showSearch ? 'text-blue-400 bg-blue-400/10' : 'text-gray-300'}`}>
             <Search size={18} />
           </button>
-          <button onClick={() => setShowFilters(!showFilters)} className={`p-1.5 rounded-lg hover:bg-gray-700 ${showFilters ? 'text-blue-400' : 'text-gray-300'}`}>
+          <button onClick={() => setShowFilters(!showFilters)} className={`p-2 rounded-lg hover:bg-gray-700 ${showFilters ? 'text-blue-400 bg-blue-400/10' : 'text-gray-300'}`}>
             <Filter size={18} />
           </button>
-          <button onClick={() => setHeatmapMode(!heatmapMode)} className={`p-1.5 rounded-lg hover:bg-gray-700 ${heatmapMode ? 'text-red-400' : 'text-gray-300'}`} title="Heatmap pannes">
-            <Thermometer size={18} />
-          </button>
-          <button onClick={zoomOut} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300"><ZoomOut size={18} /></button>
-          <span className="text-gray-500 text-[10px] w-10 text-center hidden sm:inline">{Math.round(zoom * 100)}%</span>
-          <button onClick={zoomIn} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300"><ZoomIn size={18} /></button>
-          <button onClick={fitAll} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-300"><Maximize2 size={18} /></button>
+          {!isMobile && (
+            <button onClick={() => setHeatmapMode(!heatmapMode)} className={`p-2 rounded-lg hover:bg-gray-700 ${heatmapMode ? 'text-red-400' : 'text-gray-300'}`} title="Heatmap pannes">
+              <Thermometer size={18} />
+            </button>
+          )}
+          <button onClick={zoomOut} className="p-2 rounded-lg hover:bg-gray-700 text-gray-300"><ZoomOut size={18} /></button>
+          {!isMobile && <span className="text-gray-500 text-[10px] w-10 text-center hidden sm:inline">{Math.round(zoom * 100)}%</span>}
+          <button onClick={zoomIn} className="p-2 rounded-lg hover:bg-gray-700 text-gray-300"><ZoomIn size={18} /></button>
+          {!isMobile && (
+            <button onClick={fitAll} className="p-2 rounded-lg hover:bg-gray-700 text-gray-300"><Maximize2 size={18} /></button>
+          )}
+          {isMobile && (
+            <button onClick={() => setShowOverflow(true)} className="p-2 rounded-lg hover:bg-gray-700 text-gray-300" aria-label="Plus d'actions">
+              <MoreHorizontal size={18} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -635,14 +647,16 @@ export default function SchemaInteractif() {
 
       {/* ─── Search bar ───────────────────────────────────────── */}
       {showSearch && (
-        <div className="px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0 z-20">
+        <div className={`px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0 z-30 ${isMobile ? 'sticky top-0 shadow-lg' : ''}`}>
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={isMobile ? 20 : 16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
               placeholder="Rechercher (code, nom)..."
-              className="w-full pl-10 pr-8 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500" autoFocus />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"><X size={16} /></button>
+              className={`w-full ${isMobile ? 'pl-11 pr-10 py-2.5 text-base' : 'pl-10 pr-8 py-2 text-sm'} bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500`} autoFocus />
+            {searchQuery ? (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"><X size={isMobile ? 20 : 16} /></button>
+            ) : (
+              <button onClick={() => setShowSearch(false)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white p-1" aria-label="Fermer la recherche"><X size={isMobile ? 18 : 14} /></button>
             )}
           </div>
         </div>
@@ -780,6 +794,7 @@ export default function SchemaInteractif() {
                     <span
                       className="font-bold whitespace-nowrap transition-all duration-150 select-none"
                       style={{
+                        display: 'inline-block',  // REQUIRED: CSS transform: rotate() is ignored on inline elements
                         fontSize: isHovered || isDrag ? `${hoveredEm}em` : `${labelEm}em`,
                         color: isDrag ? '#fbbf24' : isHovered ? '#60a5fa' : sc,
                         textShadow,
@@ -816,26 +831,82 @@ export default function SchemaInteractif() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════
+          MOBILE OVERFLOW MENU ("..." button)
+         ═══════════════════════════════════════════════════════ */}
+      {isMobile && showOverflow && (
+        <div className="fixed inset-0 z-50" onClick={() => setShowOverflow(false)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="absolute bottom-0 left-0 right-0 bg-gray-800 rounded-t-2xl animate-slide-up" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-gray-800 pt-3 pb-2 px-4 border-b border-gray-700">
+              <div className="w-10 h-1 bg-gray-600 rounded-full mx-auto mb-3" />
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-bold text-base">Actions</h2>
+                <button onClick={() => setShowOverflow(false)} className="text-gray-400 hover:text-white p-1"><X size={20} /></button>
+              </div>
+            </div>
+            <div className="p-3 space-y-1">
+              {/* Multi-select (edit mode only) */}
+              {editMode && (
+                <button onClick={() => { setMultiSelectMode(!multiSelectMode); if (multiSelectMode) setSelectedIds(new Set()); setShowOverflow(false) }}
+                  className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium min-h-[52px] transition-colors ${multiSelectMode ? 'bg-blue-500/15 text-blue-400' : 'text-gray-300 hover:bg-gray-700/60'}`}>
+                  {multiSelectMode ? <CheckSquare size={20} /> : <Square size={20} />}
+                  <span className="flex-1 text-left">{multiSelectMode ? 'Quitter la sélection multiple' : 'Sélection multiple'}</span>
+                  <ChevronRight size={16} className="text-gray-500" />
+                </button>
+              )}
+              {/* Heatmap */}
+              <button onClick={() => { setHeatmapMode(!heatmapMode); setShowOverflow(false) }}
+                className={`flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium min-h-[52px] transition-colors ${heatmapMode ? 'bg-red-500/15 text-red-400' : 'text-gray-300 hover:bg-gray-700/60'}`}>
+                <Thermometer size={20} />
+                <span className="flex-1 text-left">Heatmap pannes</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${heatmapMode ? 'bg-red-500/20 text-red-400' : 'bg-gray-700 text-gray-500'}`}>
+                  {heatmapMode ? 'ACTIF' : 'OFF'}
+                </span>
+              </button>
+              {/* Fit all */}
+              <button onClick={() => { fitAll(); setShowOverflow(false) }}
+                className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium min-h-[52px] text-gray-300 hover:bg-gray-700/60 transition-colors">
+                <Maximize2 size={20} />
+                <span className="flex-1 text-left">Recadrer (fit all)</span>
+                <ChevronRight size={16} className="text-gray-500" />
+              </button>
+              {/* Zoom indicator + reset */}
+              <div className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-sm font-medium min-h-[52px] text-gray-300 bg-gray-700/30">
+                <ZoomIn size={20} />
+                <span className="flex-1 text-left">Zoom actuel</span>
+                <span className="text-white font-mono">{Math.round(zoom * 100)}%</span>
+                {zoom !== 1 && (
+                  <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); setShowOverflow(false) }}
+                    className="ml-2 text-xs px-2 py-1 bg-blue-600 text-white rounded-md">Réinitialiser</button>
+                )}
+              </div>
+            </div>
+            <div className="h-4" />
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════
           EDIT / CREATE MODAL (shared form component)
          ═══════════════════════════════════════════════════════ */}
       {(showEditModal || showCreateModal) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setShowEditModal(false); setShowCreateModal(false) }} />
-          <div className="relative bg-gray-800 border border-gray-600 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className={`relative bg-gray-800 border border-gray-600 shadow-2xl w-full ${isMobile ? 'max-w-full h-[100dvh] rounded-none flex flex-col' : 'max-w-lg max-h-[85vh] rounded-2xl overflow-y-auto'}`} onClick={e => e.stopPropagation()}>
             {/* Header */}
-            <div className="sticky top-0 bg-gray-800 rounded-t-2xl border-b border-gray-700 px-5 py-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-white font-bold text-lg">{showCreateModal ? 'Ajouter un équipement' : 'Modifier l\'équipement'}</h2>
+            <div className={`sticky top-0 bg-gray-800 border-b border-gray-700 flex items-center justify-between shrink-0 ${isMobile ? 'px-4 py-3' : 'rounded-t-2xl px-5 py-4'}`}>
+              <div className="min-w-0">
+                <h2 className="text-white font-bold text-lg truncate">{showCreateModal ? 'Ajouter un équipement' : 'Modifier l\'équipement'}</h2>
                 {editingMachine && <p className="text-gray-400 text-xs mt-0.5">ID: {editingMachine.id}</p>}
               </div>
-              <button onClick={() => { setShowEditModal(false); setShowCreateModal(false) }} className="text-gray-400 hover:text-white p-1"><X size={20} /></button>
+              <button onClick={() => { setShowEditModal(false); setShowCreateModal(false) }} className="text-gray-400 hover:text-white p-2 shrink-0" aria-label="Fermer"><X size={isMobile ? 24 : 20} /></button>
             </div>
             {/* Body */}
-            <div className="p-5 space-y-4">
+            <div className={`flex-1 overflow-y-auto ${isMobile ? 'p-4 space-y-4' : 'p-5 space-y-4'}`}>
               <div>
                 <label className="block text-gray-400 text-xs font-medium mb-1">Nom *</label>
                 <input type="text" value={editForm.nom} onChange={e => setEditForm(f => ({ ...f, nom: e.target.value }))}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500" placeholder="Convoyeur d'entrée..." />
+                  className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`} placeholder="Convoyeur d'entrée..." />
               </div>
               <div>
                 <label className="block text-gray-400 text-xs font-medium mb-1">Code interne</label>
@@ -845,20 +916,20 @@ export default function SchemaInteractif() {
                   </p>
                 )}
                 <input type="text" value={editForm.code_interne} onChange={e => setEditForm(f => ({ ...f, code_interne: e.target.value }))}
-                  className={`w-full px-3 py-2 bg-gray-700 border rounded-lg text-white text-sm focus:outline-none uppercase ${showCreateModal && editForm.code_interne.trim() && data.machines.some(m => (m.code_interne || '').toUpperCase() === editForm.code_interne.trim().toUpperCase()) ? 'border-red-500 focus:border-red-500' : 'border-gray-600 focus:border-blue-500'}`} placeholder="L101" />
+                  className={`w-full bg-gray-700 border rounded-lg text-white focus:outline-none uppercase ${showCreateModal && editForm.code_interne.trim() && data.machines.some(m => (m.code_interne || '').toUpperCase() === editForm.code_interne.trim().toUpperCase()) ? 'border-red-500 focus:border-red-500' : 'border-gray-600 focus:border-blue-500'} ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`} placeholder="L101" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1">Type</label>
                   <select value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`}>
                     {TYPE_OPTIONS.map(t => (<option key={t.value} value={t.value}>{t.label}</option>))}
                   </select>
                 </div>
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1">Statut</label>
                   <select value={editForm.statut} onChange={e => setEditForm(f => ({ ...f, statut: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`}>
                     {STATUT_OPTIONS.map(s => (<option key={s.value} value={s.value}>{s.label}</option>))}
                   </select>
                 </div>
@@ -867,7 +938,7 @@ export default function SchemaInteractif() {
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1">Zone</label>
                   <select value={editForm.zone} onChange={e => setEditForm(f => ({ ...f, zone: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`}>
                     <option value="">— Aucune —</option>
                     {ZONE_OPTIONS.map(z => (<option key={z.value} value={z.value}>{z.label}</option>))}
                   </select>
@@ -875,7 +946,7 @@ export default function SchemaInteractif() {
                 <div>
                   <label className="block text-gray-400 text-xs font-medium mb-1">Étage</label>
                   <select value={editForm.etage} onChange={e => setEditForm(f => ({ ...f, etage: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500">
+                    className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`}>
                     <option value="0">E0 (RDC)</option><option value="1">E1</option><option value="2">E2</option>
                   </select>
                 </div>
@@ -883,30 +954,30 @@ export default function SchemaInteractif() {
               <div>
                 <label className="block text-gray-400 text-xs font-medium mb-1">Ligne</label>
                 <input type="text" value={editForm.ligne} onChange={e => setEditForm(f => ({ ...f, ligne: e.target.value }))}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500" placeholder="Ligne 1" />
+                  className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`} placeholder="Ligne 1" />
               </div>
               <div>
                 <label className="block text-gray-400 text-xs font-medium mb-1">Notes</label>
                 <textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} rows={2}
-                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500 resize-none" placeholder="Notes optionnelles..." />
+                  className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 resize-none ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`} placeholder="Notes optionnelles..." />
               </div>
 
               {/* ─── Appearance: Color + Size + Rotation ──────────── */}
               <div className="bg-gray-700/30 rounded-lg p-3">
                 <label className="block text-gray-400 text-xs font-medium mb-3 flex items-center gap-1.5"><Palette size={12} /> Apparence de l'étiquette</label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className={`grid gap-4 ${isMobile ? 'grid-cols-1' : 'grid-cols-2'}`}>
                   {/* Color */}
                   <div>
                     <label className="block text-gray-500 text-[10px] mb-1.5">Couleur personnalisée</label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <input type="color" value={editForm.couleur || '#22c55e'}
                         onChange={e => setEditForm(f => ({ ...f, couleur: e.target.value }))}
-                        className="w-9 h-9 rounded-lg border border-gray-600 cursor-pointer bg-transparent shrink-0" />
-                      <div className="flex flex-wrap gap-1 max-w-[140px]">
+                        className={`${isMobile ? 'w-11 h-11' : 'w-9 h-9'} rounded-lg border border-gray-600 cursor-pointer bg-transparent shrink-0`} />
+                      <div className={`flex flex-wrap gap-1.5 ${isMobile ? 'max-w-full' : 'max-w-[140px]'}`}>
                         {PRESET_COLORS.map(c => (
                           <button key={c} onClick={() => setEditForm(f => ({ ...f, couleur: f.couleur === c ? '' : c }))}
-                            className={`w-5 h-5 rounded-full border-2 transition-transform hover:scale-125 ${editForm.couleur === c ? 'border-white scale-110' : 'border-gray-600'}`}
-                            style={{ background: c }} />
+                            className={`${isMobile ? 'w-8 h-8' : 'w-5 h-5'} rounded-full border-2 transition-transform hover:scale-125 ${editForm.couleur === c ? 'border-white scale-110' : 'border-gray-600'}`}
+                            style={{ background: c }} aria-label={`Couleur ${c}`} />
                         ))}
                       </div>
                     </div>
@@ -925,19 +996,19 @@ export default function SchemaInteractif() {
                           const val = Math.max(0.3, Math.min(5, parseFloat(e.target.value) || DEFAULT_LABEL_EM))
                           setEditForm(f => ({ ...f, taille_pastille: String(val) }))
                         }}
-                        className="w-20 px-2 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm text-center focus:outline-none focus:border-blue-500" />
+                        className={`bg-gray-700 border border-gray-600 rounded-lg text-white text-center focus:outline-none focus:border-blue-500 ${isMobile ? 'w-20 px-2 py-2.5 text-base' : 'w-20 px-2 py-2 text-sm'}`} />
                       <span className="text-gray-400 text-sm">em</span>
-                      <span className="text-gray-600 text-xs">(0.3 – 5.0)</span>
+                      <span className="text-gray-600 text-xs hidden sm:inline">(0.3 – 5.0)</span>
                       {editForm.taille_pastille && Number(editForm.taille_pastille) !== DEFAULT_LABEL_EM && (
                         <button onClick={() => setEditForm(f => ({ ...f, taille_pastille: '' }))}
-                          className="text-gray-500 text-[10px] hover:text-gray-300 underline">Réinitialiser</button>
+                          className="text-gray-500 text-[10px] hover:text-gray-300 underline ml-auto">Réinit.</button>
                       )}
                     </div>
                     {/* Quick presets for convenience */}
-                    <div className="flex gap-1.5 mt-1.5">
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
                       {[0.5, 0.7, 0.9, 1.1, 1.4, 1.8, 2.2].map(v => (
                         <button key={v} onClick={() => setEditForm(f => ({ ...f, taille_pastille: String(v) }))}
-                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${Number(editForm.taille_pastille || DEFAULT_LABEL_EM) === v ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>
+                          className={`${isMobile ? 'px-3 py-1.5 text-xs' : 'px-2 py-0.5 text-[10px]'} rounded transition-colors ${Number(editForm.taille_pastille || DEFAULT_LABEL_EM) === v ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>
                           {v}
                         </button>
                       ))}
@@ -957,20 +1028,22 @@ export default function SchemaInteractif() {
                     <input type="range" min="0" max="360" step="5"
                       value={editForm.rotation || '0'}
                       onChange={e => setEditForm(f => ({ ...f, rotation: e.target.value }))}
-                      className="flex-1 accent-amber-400" />
+                      className={`flex-1 accent-amber-400 ${isMobile ? 'h-2' : ''}`} />
                     <input type="number" min="0" max="360" step="5"
                       value={editForm.rotation || '0'}
                       onChange={e => setEditForm(f => ({ ...f, rotation: Math.max(0, Math.min(360, Number(e.target.value) || 0)).toString() }))}
-                      className="w-16 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded-lg text-white text-xs text-center focus:outline-none focus:border-blue-500" />
+                      className={`bg-gray-700 border border-gray-600 rounded-lg text-white text-center focus:outline-none focus:border-blue-500 ${isMobile ? 'w-20 px-2 py-2.5 text-base' : 'w-16 px-2 py-1.5 text-xs'}`} />
                   </div>
                   {/* Live preview */}
                   <div className="flex items-center justify-center mt-2 h-16 bg-gray-800/50 rounded-lg">
                     <span className="font-bold"
                       style={{
+                        display: 'inline-block',  // REQUIRED for CSS transform on a <span>
                         fontSize: `${editForm.taille_pastille || DEFAULT_LABEL_EM}em`,
                         color: editForm.couleur || STATUT_DOT[editForm.statut] || '#6b7280',
                         textShadow: '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)',
                         transform: `rotate(${editForm.rotation || '0'}deg)`,
+                        transformOrigin: 'center center',
                       }}>
                       CV-201
                     </span>
@@ -985,35 +1058,35 @@ export default function SchemaInteractif() {
                   <div>
                     <label className="block text-gray-500 text-[10px] mb-1">pos_x</label>
                     <input type="number" step="0.1" value={editForm.pos_x} onChange={e => setEditForm(f => ({ ...f, pos_x: e.target.value }))}
-                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500 font-mono" />
+                      className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-amber-500 font-mono ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`} />
                   </div>
                   <div>
                     <label className="block text-gray-500 text-[10px] mb-1">pos_y</label>
                     <input type="number" step="0.1" value={editForm.pos_y} onChange={e => setEditForm(f => ({ ...f, pos_y: e.target.value }))}
-                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm focus:outline-none focus:border-amber-500 font-mono" />
+                      className={`w-full bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-amber-500 font-mono ${isMobile ? 'px-3 py-3 text-base' : 'px-3 py-2 text-sm'}`} />
                   </div>
                 </div>
                 {showCreateModal && <p className="text-gray-500 text-[10px] mt-1.5">Position définie par le double-clic. Ajustez si besoin.</p>}
               </div>
 
-              {/* ─── Actions ───────────────────────────────────── */}
-              <div className="flex gap-3 pt-2">
+              {/* ─── Actions: sticky bottom on mobile, inline on desktop ─── */}
+              <div className={`flex gap-3 ${isMobile ? 'sticky bottom-0 -mx-4 px-4 py-3 bg-gray-800 border-t border-gray-700' : 'pt-2'}`}>
                 {/* Delete button (edit only) */}
                 {showEditModal && editingMachine && (
                   <button onClick={() => { if (confirm(`Supprimer "${editingMachine.nom}" ?`)) handleDeleteMachine(editingMachine.id, editingMachine.nom) }}
                     disabled={deletingId === editingMachine.id}
-                    className="py-2.5 px-4 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl font-medium transition-colors text-sm flex items-center gap-2">
-                    {deletingId === editingMachine.id ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-400" /> : <Trash2 size={16} />}
+                    className={`bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${isMobile ? 'py-3.5 px-5 text-base' : 'py-2.5 px-4 text-sm'}`}>
+                    {deletingId === editingMachine.id ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-400" /> : <Trash2 size={isMobile ? 20 : 16} />}
                   </button>
                 )}
                 <button onClick={() => { setShowEditModal(false); setShowCreateModal(false) }}
-                  className="flex-1 py-2.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl font-medium transition-colors text-sm">Annuler</button>
+                  className={`flex-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-xl font-medium transition-colors ${isMobile ? 'py-3.5 text-base' : 'py-2.5 text-sm'}`}>Annuler</button>
                 <button onClick={showCreateModal ? handleCreateMachine : handleSaveEdit}
                   disabled={saving || !editForm.nom.trim()}
-                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded-xl font-bold transition-colors text-sm flex items-center justify-center gap-2">
+                  className={`flex-1 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded-xl font-bold transition-colors flex items-center justify-center gap-2 ${isMobile ? 'py-3.5 text-base' : 'py-2.5 text-sm'}`}>
                   {saving ? (<><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" /> Sauvegarde...</>)
-                    : showCreateModal ? (<><Plus size={16} /> Créer</>)
-                    : (<><Save size={16} /> Enregistrer</>)}
+                    : showCreateModal ? (<><Plus size={isMobile ? 20 : 16} /> Créer</>)
+                    : (<><Save size={isMobile ? 20 : 16} /> Enregistrer</>)}
                 </button>
               </div>
             </div>
@@ -1136,8 +1209,8 @@ export default function SchemaInteractif() {
 
       {/* ─── Multi-select batch action bar ──────────────────── */}
       {multiSelectMode && selectedIds.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 bg-gray-800 border-t border-blue-500/30 px-4 py-3 flex items-center justify-between"
-          style={isMobile ? { marginBottom: 40 } : {}}>
+        <div className="fixed left-0 right-0 z-40 bg-gray-800 border-t border-blue-500/30 px-4 py-3 flex items-center justify-between"
+          style={isMobile ? { bottom: '4rem' /* sit above the 64px bottom nav */ } : { bottom: 0 }}>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm">{selectedIds.size}</div>
             <span className="text-white font-medium text-sm">{selectedIds.size} sélectionné{selectedIds.size > 1 ? 's' : ''}</span>
@@ -1153,12 +1226,27 @@ export default function SchemaInteractif() {
         </div>
       )}
 
-      {/* ─── Mobile legend bar ────────────────────────────────── */}
+      {/* ─── Mobile legend bar (collapsible to save canvas space) ─── */}
       {isMobile && (
-        <div className="flex items-center justify-center gap-3 px-2 py-1.5 bg-gray-800 border-t border-gray-700 shrink-0 overflow-x-auto">
-          {Object.entries(TYPE_CONFIG).map(([key, tc]) => (
-            <div key={key} className="flex items-center gap-1 shrink-0"><span className="w-2.5 h-2.5 rounded-full" style={{ background: tc.color }} /><span className="text-gray-400 text-[10px]">{tc.label}</span></div>
-          ))}
+        <div className="shrink-0 bg-gray-800 border-t border-gray-700">
+          <button
+            onClick={() => setShowLegend(!showLegend)}
+            className="w-full flex items-center justify-between px-3 py-1.5 text-gray-400 text-[11px] active:bg-gray-700 transition-colors"
+            aria-expanded={showLegend}
+            aria-label="Basculer la légende">
+            <span className="flex items-center gap-1.5">
+              <Layers size={12} />
+              Légende {showLegend ? '' : '(afficher)'}
+            </span>
+            <ChevronRight size={12} className={`transition-transform ${showLegend ? 'rotate-90' : ''}`} />
+          </button>
+          {showLegend && (
+            <div className="flex items-center gap-3 px-3 pb-2 overflow-x-auto">
+              {Object.entries(TYPE_CONFIG).map(([key, tc]) => (
+                <div key={key} className="flex items-center gap-1 shrink-0"><span className="w-2.5 h-2.5 rounded-full" style={{ background: tc.color }} /><span className="text-gray-400 text-[10px]">{tc.label}</span></div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

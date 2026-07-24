@@ -3,6 +3,30 @@
 Tous les changements notables du projet RefMaint/TriMaint sont documentés ici.
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/).
 
+## [1.3.3] - 2026-07-24
+
+### Corrigé
+- **Rotation des étiquettes non persistante** : la rotation était stockée
+  **uniquement dans `localStorage`** du navigateur (clé
+  `trimaint_label_rotations`) et n'était jamais envoyée au backend, bien que
+  la colonne `machines.rotation` existe. Conséquence : la rotation ne marchait
+  que sur le navigateur qui l'avait saisie, était invisible pour les autres
+  utilisateurs, et était perdue en navigation privée / autre appareil / cache
+  vidé. L'endpoint `GET /api/machines/schema-data` ne renvoyait d'ailleurs pas
+  le champ `rotation`. Corrections :
+  - Backend : `schema-data` renvoie désormais `rotation` pour chaque machine.
+  - Frontend : ajout de `rotation?` à l'interface `SchemaMachine` et au type
+    global `Machine` (`frontend/src/types/index.ts`).
+  - Frontend (`SchemaInteractif.tsx`) : suppression de `rotationMap` / de
+    `saveRotation` / de l'init depuis `localStorage`. La rotation est lue
+    directement depuis l'objet machine (`m.rotation ?? 0`) dans le rendu et
+    dans `openEditModal`.
+  - Frontend : la rotation est envoyée au backend dans les payloads de
+    `POST /api/machines/` (création) et `PUT /api/machines/{id}` (édition).
+  - Migration un-shot fournie : `scripts/migrate_label_rotations_to_db.js`
+    (à coller dans la console du navigateur) pousse les rotations
+    pré-existantes du `localStorage` vers la DB.
+
 ## [1.3.2] - 2026-07-24
 
 ### Corrigé

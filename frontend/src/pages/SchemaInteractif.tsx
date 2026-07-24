@@ -20,6 +20,7 @@ interface SchemaMachine {
   zone: string | null; etage: number | null; ligne: string | null
   pos_x: number | null; pos_y: number | null; type: string
   modele?: string | null; couleur?: string | null; taille_pastille?: number | null
+  rotation?: number | null
 }
 interface SchemaData {
   machines: SchemaMachine[]; zones: string[]; etages: number[]; lignes: string[]
@@ -417,20 +418,8 @@ export default function SchemaInteractif() {
     catch { toast.error('Erreur sauvegarde position') }
   }, [])
 
-  // ─── Rotation (stored in localStorage, keyed by machine id) ───
-  const [rotationMap, setRotationMap] = useState<Record<number, number>>(() => {
-    try {
-      const raw = localStorage.getItem('trimaint_label_rotations')
-      return raw ? JSON.parse(raw) : {}
-    } catch { return {} }
-  })
-  const saveRotation = useCallback((id: number, deg: number) => {
-    setRotationMap(prev => {
-      const next = { ...prev, [id]: deg }
-      try { localStorage.setItem('trimaint_label_rotations', JSON.stringify(next)) } catch {}
-      return next
-    })
-  }, [])
+  // ─── Rotation: persisted on the backend (machines.rotation column) ───
+  // No more localStorage — rotation now follows the machine across all browsers/devices.
 
   // ─── Open edit modal ────────────────────────────────────────
   const openEditModal = useCallback((m: SchemaMachine) => {
@@ -444,7 +433,7 @@ export default function SchemaInteractif() {
       taille_pastille: m.taille_pastille
         ? String(Number.isInteger(m.taille_pastille) && m.taille_pastille > 0 && m.taille_pastille < 20 ? m.taille_pastille / 10 : m.taille_pastille)
         : '',
-      rotation: String(rotationMap[m.id] ?? 0),
+      rotation: String(m.rotation ?? 0),
     })
     setShowEditModal(true)
   }, [])
@@ -462,15 +451,15 @@ export default function SchemaInteractif() {
         pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
         couleur: editForm.couleur || null,
         taille_pastille: editForm.taille_pastille ? parseFloat(editForm.taille_pastille) : null,
+        rotation: parseFloat(editForm.rotation) || 0,
       }
       if (editForm.notes.trim()) payload.notes = editForm.notes
       await api.put(`/machines/${editingMachine.id}`, payload)
-      saveRotation(editingMachine.id, parseFloat(editForm.rotation) || 0)
       toast.success(`${editForm.code_interne || editForm.nom} mis à jour`, { duration: 3000 })
       setShowEditModal(false); setEditingMachine(null); fetchData()
     } catch { toast.error('Erreur lors de la sauvegarde') }
     finally { setSaving(false) }
-  }, [editingMachine, editForm, fetchData, saveRotation])
+  }, [editingMachine, editForm, fetchData])
 
   // ─── Create new machine ─────────────────────────────────────
   const handleCreateMachine = useCallback(async () => {
@@ -496,9 +485,9 @@ export default function SchemaInteractif() {
         pos_y: editForm.pos_y ? parseFloat(editForm.pos_y) : null,
         couleur: editForm.couleur || null,
         taille_pastille: editForm.taille_pastille ? parseFloat(editForm.taille_pastille) : null,
+        rotation: parseFloat(editForm.rotation) || 0,
       }
       await api.post('/machines/', payload)
-      // Save rotation to localStorage (response contains the new machine with id)
       toast.success(`${editForm.nom} créé`, { duration: 3000 })
       setShowCreateModal(false)
       setEditForm(emptyForm())
@@ -511,7 +500,7 @@ export default function SchemaInteractif() {
         toast.error(msg || 'Erreur lors de la création')
     }
     finally { setSaving(false) }
-  }, [editForm, fetchData, saveRotation])
+  }, [editForm, fetchData])
 
   // ─── Delete machine ─────────────────────────────────────────
   const handleDeleteMachine = useCallback(async (id: number, nom: string) => {
@@ -741,7 +730,7 @@ export default function SchemaInteractif() {
                 const isSelected = selectedIds.has(m.id)
                 const labelEm = getLabelEm(m) * (isMobile ? MOBILE_EM_FACTOR : 1)
                 const hoveredEm = labelEm * 1.2
-                const rotation = rotationMap[m.id] ?? 0
+                const rotation = m.rotation ?? 0
 
                 // Build text-shadow stack for readability / highlights
                 const baseShadow = '0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.5)'

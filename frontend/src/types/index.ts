@@ -31,6 +31,9 @@ export interface Machine {
   notes: string | null
   pos_x: number | null
   pos_y: number | null
+  couleur: string | null
+  taille_pastille: number | null
+  rotation: number | null
   created_at: string
   updated_at: string | null
 }
